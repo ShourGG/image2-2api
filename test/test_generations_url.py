@@ -1,4 +1,4 @@
-from test.utils import post_json
+from test.http_test_utils import post_json
 
 
 def main() -> None:

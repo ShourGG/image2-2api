@@ -6,10 +6,7 @@ import unittest
 import requests
 
 from services.protocol import openai_v1_models
-
-
-AUTH_KEY = "chatgpt2api"
-BASE_URL = "http://localhost:8000"
+from test.http_test_utils import AUTH_KEY, BASE_URL, requires_http_server
 
 
 class ModelListTests(unittest.TestCase):
@@ -19,6 +16,7 @@ class ModelListTests(unittest.TestCase):
         print("function result:")
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
+    @requires_http_server
     def test_list_models_http(self):
         """测试通过 HTTP 接口获取模型列表。"""
         response = requests.get(

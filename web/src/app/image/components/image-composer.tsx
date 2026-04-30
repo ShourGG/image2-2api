@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUp, Check, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObject } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -29,6 +29,7 @@ type ImageComposerProps = {
   onImageQualityChange: (value: ImageQuality) => void;
   onGenerationModeChange: (value: ImageGenerationMode) => void;
   onSubmit: () => void | Promise<void>;
+  onOpenPromptLibrary: () => void;
   onPickReferenceImage: () => void;
   onReferenceImageChange: (files: File[]) => void | Promise<void>;
   onRemoveReferenceImage: (index: number) => void;
@@ -54,6 +55,7 @@ export function ImageComposer({
   onImageQualityChange,
   onGenerationModeChange,
   onSubmit,
+  onOpenPromptLibrary,
   onPickReferenceImage,
   onReferenceImageChange,
   onRemoveReferenceImage,
@@ -213,6 +215,15 @@ export function ImageComposer({
                   >
                     <ImagePlus className="size-3.5 sm:size-4" />
                     <span>{referenceImages.length > 0 ? "添加参考图" : "上传"}</span>
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 shrink-0 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    onClick={onOpenPromptLibrary}
+                  >
+                    <BookOpen className="size-3.5 sm:size-4" />
+                    <span>模板库</span>
                   </Button>
                   <div
                     className="inline-flex min-w-0 max-w-[62vw] items-center rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:max-w-[560px] sm:px-3 sm:py-2 sm:text-xs"

@@ -6,12 +6,10 @@ import unittest
 
 import requests
 
-from test.utils import save_image
-
-AUTH_KEY = "chatgpt2api"
-BASE_URL = "http://localhost:8000"
+from test.http_test_utils import AUTH_KEY, BASE_URL, requires_http_server, save_image
 
 
+@requires_http_server
 class ImageGenerationsTests(unittest.TestCase):
     def test_image_generation_http(self):
         """测试图片生成的非流式 HTTP 调用。"""

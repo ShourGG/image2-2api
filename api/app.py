@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Event
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +22,19 @@ def _should_bypass_spa_fallback(clean_path: str) -> bool:
     if clean_path in {"docs", "redoc"}:
         return True
     return bool(Path(clean_path).suffix)
+
+
+def _resolve_web_response(full_path: str, *, head_only: bool = False):
+    clean_path = full_path.strip("/")
+    asset = resolve_web_asset(clean_path)
+    if asset is not None:
+        return Response(status_code=200) if head_only else FileResponse(asset)
+    if _should_bypass_spa_fallback(clean_path):
+        raise HTTPException(status_code=404, detail="Not Found")
+    fallback = resolve_web_asset("")
+    if fallback is None:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return Response(status_code=200) if head_only else FileResponse(fallback)
 
 
 def create_app() -> FastAPI:
@@ -65,15 +78,10 @@ def create_app() -> FastAPI:
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_web(full_path: str):
-        clean_path = full_path.strip("/")
-        asset = resolve_web_asset(clean_path)
-        if asset is not None:
-            return FileResponse(asset)
-        if _should_bypass_spa_fallback(clean_path):
-            raise HTTPException(status_code=404, detail="Not Found")
-        fallback = resolve_web_asset("")
-        if fallback is None:
-            raise HTTPException(status_code=404, detail="Not Found")
-        return FileResponse(fallback)
+        return _resolve_web_response(full_path)
+
+    @app.head("/{full_path:path}", include_in_schema=False)
+    async def serve_web_head(full_path: str):
+        return _resolve_web_response(full_path, head_only=True)
 
     return app

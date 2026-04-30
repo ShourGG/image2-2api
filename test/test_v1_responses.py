@@ -6,15 +6,14 @@ import unittest
 
 import requests
 
-from test.utils import save_image
+from test.http_test_utils import AUTH_KEY, BASE_URL, requires_http_server, save_image
 
-AUTH_KEY = "chatgpt2api"
-BASE_URL = "http://localhost:8000"
 TEXT_MODEL = "auto"
 IMAGE_MODEL = "gpt-image-2"
 CODEX_IMAGE_MODEL = "codex-gpt-image-2"
 
 
+@requires_http_server
 class ResponsesTests(unittest.TestCase):
     @staticmethod
     def _iter_sse_payloads(response: requests.Response):

@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import unittest
 from pathlib import Path
 
 import requests
 
-from test.utils import save_image
-from utils.log import logger
+from test.http_test_utils import AUTH_KEY, BASE_URL, requires_http_server, save_image
 
-AUTH_KEY = "chatgpt2api"
-BASE_URL = "http://localhost:8000"
 ASSETS_DIR = Path(__file__).resolve().parents[1] / "assets"
+logger = logging.getLogger(__name__)
 
 
 def load_asset_bytes(name: str) -> bytes:
@@ -35,6 +34,7 @@ def summarize_chunk(chunk: dict[str, object]) -> dict[str, object]:
     }
 
 
+@requires_http_server
 class ImageEditsTests(unittest.TestCase):
     def test_image_edit_http(self):
         """测试图片编辑的非流式 HTTP 调用。"""

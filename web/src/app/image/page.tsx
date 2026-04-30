@@ -5,6 +5,7 @@ import { History, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { ImageComposer } from "@/app/image/components/image-composer";
+import { ImagePromptLibraryDialog } from "@/app/image/components/image-prompt-library-dialog";
 import { ImageResults, type ImageLightboxItem } from "@/app/image/components/image-results";
 import { ImageSidebar } from "@/app/image/components/image-sidebar";
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -651,6 +652,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const [conversations, setConversations] = useState<ImageConversation[]>([]);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [isPromptLibraryOpen, setIsPromptLibraryOpen] = useState(false);
   const [quotaSource, setQuotaSource] = useState<QuotaSource>("loading");
   const [quotaErrorHint, setQuotaErrorHint] = useState("");
   const [userPoints, setUserPoints] = useState<number | null>(null);
@@ -1214,6 +1216,20 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     [appendReferenceImages],
   );
 
+  const handleApplyPromptTemplate = useCallback((templatePrompt: string, mode: "replace" | "append") => {
+    setImagePrompt((current) => {
+      const normalizedCurrent = current.trim();
+      if (mode === "append" && normalizedCurrent) {
+        return `${current.trimEnd()}\n\n${templatePrompt}`;
+      }
+      return templatePrompt;
+    });
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 0);
+    toast.success(mode === "append" ? "模板已追加到输入框" : "模板已填入输入框");
+  }, []);
+
   const handleRemoveReferenceImage = useCallback((index: number) => {
     setReferenceImageFiles((prev) => {
       const next = prev.filter((_, currentIndex) => currentIndex !== index);
@@ -1646,6 +1662,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             onImageQualityChange={setImageQuality}
             onGenerationModeChange={setImageGenerationMode}
             onSubmit={handleSubmit}
+            onOpenPromptLibrary={() => setIsPromptLibraryOpen(true)}
             onPickReferenceImage={() => fileInputRef.current?.click()}
             onReferenceImageChange={handleReferenceImageChange}
             onRemoveReferenceImage={handleRemoveReferenceImage}
@@ -1659,6 +1676,12 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
         open={lightboxOpen}
         onOpenChange={setLightboxOpen}
         onIndexChange={setLightboxIndex}
+      />
+
+      <ImagePromptLibraryDialog
+        open={isPromptLibraryOpen}
+        onOpenChange={setIsPromptLibraryOpen}
+        onApplyPrompt={handleApplyPromptTemplate}
       />
 
       {deleteConfirm ? (
