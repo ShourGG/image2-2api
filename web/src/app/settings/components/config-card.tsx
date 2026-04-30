@@ -1,0 +1,570 @@
+"use client";
+
+import { LoaderCircle, PlugZap, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { bindAdminAccount, fetchImageApiUpstreamUsage, testProxy, type ProxyTestResult } from "@/lib/api";
+
+import { useSettingsStore } from "../store";
+
+function formatNumber(value: unknown) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "";
+  }
+  return numeric.toFixed(4).replace(/\.?0+$/, "");
+}
+
+function formatUpstreamUsageResult(result: { ok: boolean; status: number; usage?: unknown; error?: unknown }) {
+  if (!result.ok) {
+    const error =
+      typeof result.error === "string"
+        ? result.error
+        : result.error
+          ? JSON.stringify(result.error)
+          : "上游不支持 /v1/usage 或 key 不可用";
+    return `查询失败：${error}`;
+  }
+  const usage = result.usage;
+  if (!usage || typeof usage !== "object") {
+    return "查询成功，但上游没有返回额度明细";
+  }
+  const data = usage as Record<string, unknown>;
+  const quota = data.quota && typeof data.quota === "object" ? (data.quota as Record<string, unknown>) : null;
+  const parts: string[] = [];
+  if (typeof data.mode === "string") {
+    parts.push(`模式 ${data.mode}`);
+  }
+  if (quota) {
+    const remaining = formatNumber(quota.remaining);
+    const used = formatNumber(quota.used);
+    const limit = formatNumber(quota.limit);
+    if (remaining) parts.push(`剩余 ${remaining} ${quota.unit || data.unit || ""}`.trim());
+    if (used || limit) parts.push(`已用/总额 ${used || "-"} / ${limit || "-"} ${quota.unit || data.unit || ""}`.trim());
+  } else {
+    const remaining = formatNumber(data.remaining);
+    const balance = formatNumber(data.balance);
+    if (remaining) parts.push(`剩余 ${remaining} ${data.unit || ""}`.trim());
+    if (balance) parts.push(`余额 ${balance} ${data.unit || ""}`.trim());
+  }
+  const usageSummary = data.usage && typeof data.usage === "object" ? (data.usage as Record<string, unknown>) : null;
+  const total = usageSummary?.total && typeof usageSummary.total === "object" ? (usageSummary.total as Record<string, unknown>) : null;
+  if (total) {
+    const cost = formatNumber(total.actual_cost ?? total.cost);
+    if (cost) parts.push(`历史消耗 ${cost} ${data.unit || "USD"}`.trim());
+  }
+  return parts.length > 0 ? parts.join("；") : `查询成功：${JSON.stringify(usage)}`;
+}
+
+export function ConfigCard() {
+  const [isTestingProxy, setIsTestingProxy] = useState(false);
+  const [proxyTestResult, setProxyTestResult] = useState<ProxyTestResult | null>(null);
+  const [testingUpstreamId, setTestingUpstreamId] = useState("");
+  const [upstreamUsageResults, setUpstreamUsageResults] = useState<Record<string, string>>({});
+  const [adminBindName, setAdminBindName] = useState("");
+  const [adminBindEmail, setAdminBindEmail] = useState("");
+  const [adminBindPassword, setAdminBindPassword] = useState("");
+  const [isBindingAdmin, setIsBindingAdmin] = useState(false);
+  const logLevelOptions = ["debug", "info", "warning", "error"];
+  const config = useSettingsStore((state) => state.config);
+  const isLoadingConfig = useSettingsStore((state) => state.isLoadingConfig);
+  const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
+  const setRefreshAccountIntervalMinute = useSettingsStore((state) => state.setRefreshAccountIntervalMinute);
+  const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
+  const setAuthRateLimitField = useSettingsStore((state) => state.setAuthRateLimitField);
+  const setAutoRemoveInvalidAccounts = useSettingsStore((state) => state.setAutoRemoveInvalidAccounts);
+  const setAutoRemoveRateLimitedAccounts = useSettingsStore((state) => state.setAutoRemoveRateLimitedAccounts);
+  const setLogLevel = useSettingsStore((state) => state.setLogLevel);
+  const setImageGenerationStrategy = useSettingsStore((state) => state.setImageGenerationStrategy);
+  const addImageApiUpstream = useSettingsStore((state) => state.addImageApiUpstream);
+  const updateImageApiUpstream = useSettingsStore((state) => state.updateImageApiUpstream);
+  const deleteImageApiUpstream = useSettingsStore((state) => state.deleteImageApiUpstream);
+  const setProxy = useSettingsStore((state) => state.setProxy);
+  const setBaseUrl = useSettingsStore((state) => state.setBaseUrl);
+  const saveConfig = useSettingsStore((state) => state.saveConfig);
+  const authRateLimitGroups = [
+    {
+      title: "登录限流",
+      hint: "建议保守一些，防撞库。填 0 可关闭某条规则。",
+      fields: [
+        {
+          key: "auth_rate_limit_login_ip_limit" as const,
+          label: "同 IP 次数",
+          placeholder: "30",
+        },
+        {
+          key: "auth_rate_limit_login_ip_window_seconds" as const,
+          label: "同 IP 窗口秒数",
+          placeholder: "300",
+        },
+        {
+          key: "auth_rate_limit_login_ip_email_limit" as const,
+          label: "同 IP + 同邮箱 次数",
+          placeholder: "10",
+        },
+        {
+          key: "auth_rate_limit_login_ip_email_window_seconds" as const,
+          label: "同 IP + 同邮箱 窗口秒数",
+          placeholder: "300",
+        },
+      ],
+    },
+    {
+      title: "注册限流",
+      hint: "注册建议比登录更严，避免批量刷号。填 0 可关闭某条规则。",
+      fields: [
+        {
+          key: "auth_register_ip_account_limit" as const,
+          label: "同 IP 成功注册账号数",
+          placeholder: "1",
+        },
+        {
+          key: "auth_rate_limit_register_ip_limit" as const,
+          label: "同 IP 次数",
+          placeholder: "10",
+        },
+        {
+          key: "auth_rate_limit_register_ip_window_seconds" as const,
+          label: "同 IP 窗口秒数",
+          placeholder: "1800",
+        },
+        {
+          key: "auth_rate_limit_register_ip_email_limit" as const,
+          label: "同 IP + 同邮箱 次数",
+          placeholder: "3",
+        },
+        {
+          key: "auth_rate_limit_register_ip_email_window_seconds" as const,
+          label: "同 IP + 同邮箱 窗口秒数",
+          placeholder: "1800",
+        },
+      ],
+    },
+  ];
+
+  const handleTestProxy = async () => {
+    const candidate = String(config?.proxy || "").trim();
+    if (!candidate) {
+      toast.error("请先填写代理地址");
+      return;
+    }
+    setIsTestingProxy(true);
+    setProxyTestResult(null);
+    try {
+      const data = await testProxy(candidate);
+      setProxyTestResult(data.result);
+      if (data.result.ok) {
+        toast.success(`代理可用（${data.result.latency_ms} ms，HTTP ${data.result.status}）`);
+      } else {
+        toast.error(`代理不可用：${data.result.error ?? "未知错误"}`);
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "测试代理失败");
+    } finally {
+      setIsTestingProxy(false);
+    }
+  };
+
+  const handleTestUpstreamUsage = async (upstreamId: string) => {
+    setTestingUpstreamId(upstreamId);
+    setUpstreamUsageResults((current) => ({ ...current, [upstreamId]: "查询中..." }));
+    try {
+      const data = await fetchImageApiUpstreamUsage(upstreamId);
+      setUpstreamUsageResults((current) => ({
+        ...current,
+        [upstreamId]: formatUpstreamUsageResult(data.result),
+      }));
+    } catch (error) {
+      setUpstreamUsageResults((current) => ({
+        ...current,
+        [upstreamId]: error instanceof Error ? error.message : "查询失败",
+      }));
+    } finally {
+      setTestingUpstreamId("");
+    }
+  };
+
+  const handleBindAdminAccount = async () => {
+    const normalizedEmail = adminBindEmail.trim();
+    if (!normalizedEmail || !adminBindPassword) {
+      toast.error("请填写管理员邮箱和密码");
+      return;
+    }
+    setIsBindingAdmin(true);
+    try {
+      const data = await bindAdminAccount({
+        email: normalizedEmail,
+        password: adminBindPassword,
+        name: adminBindName.trim(),
+      });
+      setAdminBindPassword("");
+      toast.success(`管理员账号已绑定：${data.item.email}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "绑定管理员账号失败");
+    } finally {
+      setIsBindingAdmin(false);
+    }
+  };
+
+  if (isLoadingConfig) {
+    return (
+      <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
+        <CardContent className="flex items-center justify-center p-10">
+          <LoaderCircle className="size-5 animate-spin text-stone-400" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
+      <CardContent className="space-y-4 p-6">
+        <div className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-3 text-sm leading-6 text-stone-600">
+          登录入口已经合并：普通用户和管理员都使用邮箱密码登录；后台密钥只在首次部署初始化时使用。
+        </div>
+        <div className="rounded-xl border border-stone-200 bg-white p-4">
+          <div className="mb-4 flex items-start gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-stone-100">
+              <ShieldCheck className="size-5 text-stone-600" />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-stone-800">管理员账号绑定</div>
+              <p className="mt-1 text-xs leading-5 text-stone-500">
+                当前已登录管理员可以绑定或更新后台邮箱密码。以后登录页直接填这个邮箱密码即可进后台。
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-sm text-stone-700">管理员名称</label>
+              <Input
+                value={adminBindName}
+                onChange={(event) => setAdminBindName(event.target.value)}
+                placeholder="可选，例如 Shour"
+                className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-stone-700">管理员邮箱</label>
+              <Input
+                type="email"
+                value={adminBindEmail}
+                onChange={(event) => setAdminBindEmail(event.target.value)}
+                placeholder="admin@example.com"
+                className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+              />
+            </div>
+            <div>
+              <label className="text-sm text-stone-700">登录密码</label>
+              <Input
+                type="password"
+                value={adminBindPassword}
+                onChange={(event) => setAdminBindPassword(event.target.value)}
+                placeholder="至少 6 位"
+                className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+                autoComplete="new-password"
+              />
+            </div>
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button
+              type="button"
+              className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+              onClick={() => void handleBindAdminAccount()}
+              disabled={isBindingAdmin}
+            >
+              {isBindingAdmin ? <LoaderCircle className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+              绑定管理员身份
+            </Button>
+          </div>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">账号刷新间隔</label>
+            <Input
+              value={String(config?.refresh_account_interval_minute || "")}
+              onChange={(event) => setRefreshAccountIntervalMinute(event.target.value)}
+              placeholder="分钟"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+            />
+            <p className="text-xs text-stone-500">单位分钟，控制账号自动刷新频率。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">全局代理</label>
+            <Input
+              value={String(config?.proxy || "")}
+              onChange={(event) => {
+                setProxy(event.target.value);
+                setProxyTestResult(null);
+              }}
+              placeholder="http://127.0.0.1:7890"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+            />
+            <p className="text-xs text-stone-500">留空表示不使用代理。</p>
+            {proxyTestResult ? (
+              <div
+                className={`rounded-xl border px-3 py-2 text-xs leading-6 ${
+                  proxyTestResult.ok
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                    : "border-rose-200 bg-rose-50 text-rose-800"
+                }`}
+              >
+                {proxyTestResult.ok
+                  ? `代理可用：HTTP ${proxyTestResult.status}，用时 ${proxyTestResult.latency_ms} ms`
+                  : `代理不可用：${proxyTestResult.error ?? "未知错误"}（用时 ${proxyTestResult.latency_ms} ms）`}
+              </div>
+            ) : null}
+            <div className="flex justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
+                onClick={() => void handleTestProxy()}
+                disabled={isTestingProxy}
+              >
+                {isTestingProxy ? <LoaderCircle className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
+                测试代理
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">图片访问地址</label>
+            <Input
+              value={String(config?.base_url || "")}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              placeholder="https://example.com"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+            />
+            <p className="text-xs text-stone-500">用于生成图片结果的访问前缀地址。</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm text-stone-700">图片自动清理</label>
+            <Input
+              value={String(config?.image_retention_days || "")}
+              onChange={(event) => setImageRetentionDays(event.target.value)}
+              placeholder="30"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+            />
+            <p className="text-xs text-stone-500">自动删除多少天前的本地图片。</p>
+          </div>
+          <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 md:col-span-2">
+            <div>
+              <label className="text-sm text-stone-700">登录 / 注册限流</label>
+              <p className="mt-1 text-xs text-stone-500">后台可直接调节；命中后返回 429，并附带重试秒数。</p>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              {authRateLimitGroups.map((group) => (
+                <div key={group.title} className="space-y-3 rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                  <div>
+                    <div className="text-sm font-medium text-stone-800">{group.title}</div>
+                    <p className="mt-1 text-xs text-stone-500">{group.hint}</p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {group.fields.map((field) => (
+                      <div key={field.key} className="space-y-2">
+                        <label className="text-sm text-stone-700">{field.label}</label>
+                        <Input
+                          value={String(config?.[field.key] ?? "")}
+                          onChange={(event) => setAuthRateLimitField(field.key, event.target.value)}
+                          placeholder={field.placeholder}
+                          className="h-10 rounded-xl border-stone-200 bg-white"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <label className="text-sm text-stone-700">生图方法</label>
+            <Select
+              value={String(config?.image_generation_strategy || "chatgpt2api")}
+              onValueChange={(value) =>
+                setImageGenerationStrategy(
+                  value === "gpt2api" || value === "codex_responses" || value === "openai_compatible"
+                    ? value
+                    : "chatgpt2api",
+                )
+              }
+            >
+              <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="chatgpt2api">当前项目方式：gpt-image-2 固定走 gpt-5-3</SelectItem>
+                <SelectItem value="gpt2api">432539/gpt2api 方式：Free 号走 auto，付费号走 gpt-5-3</SelectItem>
+                <SelectItem value="codex_responses">Codex Responses：走 gpt-image-2 图片工具链</SelectItem>
+                <SelectItem value="openai_compatible">OpenAI兼容 API 上游：直接请求自定义 base_url</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-stone-500">
+              选择 OpenAI兼容 API 上游后，图片请求会直接转发到自定义 base_url；其他方式继续走本地 ChatGPT 账号池。
+            </p>
+          </div>
+          {config?.image_generation_strategy === "openai_compatible" ? (
+            <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4 md:col-span-2">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-stone-800">OpenAI兼容图片上游</div>
+                  <p className="mt-1 text-xs text-stone-500">按列表顺序尝试；每个上游单独设置并发上限，某个 key 失败会自动切到下一个。</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
+                  onClick={addImageApiUpstream}
+                >
+                  <Plus className="size-4" />
+                  添加上游
+                </Button>
+              </div>
+              {(config?.image_generation_api_upstreams || []).map((upstream, index) => (
+                <div key={upstream.id} className="space-y-3 rounded-2xl border border-stone-100 bg-stone-50 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="flex items-center gap-2 text-sm font-medium text-stone-800">
+                      <Checkbox
+                        checked={upstream.enabled !== false}
+                        onCheckedChange={(checked) => updateImageApiUpstream(upstream.id, { enabled: Boolean(checked) })}
+                      />
+                      启用上游 {index + 1}
+                    </label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-8 rounded-xl border-rose-200 bg-white px-3 text-rose-600 hover:bg-rose-50"
+                      onClick={() => deleteImageApiUpstream(upstream.id)}
+                    >
+                      <Trash2 className="size-4" />
+                      删除
+                    </Button>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="text-sm text-stone-700">名称</label>
+                      <Input
+                        value={upstream.name}
+                        onChange={(event) => updateImageApiUpstream(upstream.id, { name: event.target.value })}
+                        placeholder={`上游 ${index + 1}`}
+                        className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-stone-700">上游图片模型</label>
+                      <Input
+                        value={upstream.model}
+                        onChange={(event) => updateImageApiUpstream(upstream.id, { model: event.target.value })}
+                        placeholder="gpt-image-2"
+                        className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-sm text-stone-700">并发上限</label>
+                      <Input
+                        value={String(upstream.max_concurrency || "")}
+                        onChange={(event) => updateImageApiUpstream(upstream.id, { max_concurrency: event.target.value })}
+                        placeholder="8"
+                        className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm text-stone-700">Base URL</label>
+                    <Input
+                      value={upstream.base_url}
+                      onChange={(event) => updateImageApiUpstream(upstream.id, { base_url: event.target.value })}
+                      placeholder="http://your-sub2api-host:8010"
+                      className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                    <p className="mt-1 text-xs text-stone-500">系统会请求 /v1/images/generations、/v1/images/edits、/v1/usage。</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-stone-700">API Key</label>
+                    <Input
+                      type="password"
+                      value={String(upstream.api_key || "")}
+                      onChange={(event) => updateImageApiUpstream(upstream.id, { api_key: event.target.value })}
+                      placeholder={upstream.api_key_set ? "已保存，留空不修改" : "sk-..."}
+                      className="mt-2 h-10 rounded-xl border-stone-200 bg-white"
+                      autoComplete="off"
+                    />
+                    <p className="mt-1 text-xs text-stone-500">保存后不会回显；留空会保留旧 key。新填/修改 key 后请先保存再查额度。</p>
+                  </div>
+                  <div className="text-xs text-stone-500">这个上游自己能抗多少并发就填多少；满了以后会自动排队，也会优先尝试其他还有空位的上游。</div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="text-xs leading-6 text-stone-500">
+                      {upstreamUsageResults[upstream.id] || (upstream.api_key_set ? "可查询 /v1/usage 额度" : "未保存 key")}
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
+                      onClick={() => void handleTestUpstreamUsage(upstream.id)}
+                      disabled={testingUpstreamId === upstream.id || !upstream.api_key_set || Boolean(upstream.api_key)}
+                    >
+                      {testingUpstreamId === upstream.id ? <LoaderCircle className="size-4 animate-spin" /> : <PlugZap className="size-4" />}
+                      查额度
+                    </Button>
+                  </div>
+                </div>
+              ))}
+              {(config?.image_generation_api_upstreams || []).length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50 px-4 py-6 text-center text-sm text-stone-500">
+                  还没有上游，先点“添加上游”。
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+            <Checkbox
+              checked={Boolean(config?.auto_remove_invalid_accounts)}
+              onCheckedChange={(checked) => setAutoRemoveInvalidAccounts(Boolean(checked))}
+            />
+            自动移除异常账号
+          </label>
+          <label className="flex items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+            <Checkbox
+              checked={Boolean(config?.auto_remove_rate_limited_accounts)}
+              onCheckedChange={(checked) => setAutoRemoveRateLimitedAccounts(Boolean(checked))}
+            />
+            自动移除限流账号
+          </label>
+          <div className="space-y-3 rounded-xl border border-stone-200 bg-white px-4 py-3">
+            <div>
+              <label className="text-sm text-stone-700">控制台日志级别</label>
+              <p className="mt-1 text-xs text-stone-500">不选择时使用默认 info / warning / error。</p>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {logLevelOptions.map((level) => (
+                <label key={level} className="flex items-center gap-2 text-sm capitalize text-stone-700">
+                  <Checkbox
+                    checked={Boolean(config?.log_levels?.includes(level))}
+                    onCheckedChange={(checked) => setLogLevel(level, Boolean(checked))}
+                  />
+                  {level}
+                </label>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end">
+          <Button
+            className="h-10 rounded-xl bg-stone-950 px-5 text-white hover:bg-stone-800"
+            onClick={() => void saveConfig()}
+            disabled={isSavingConfig}
+          >
+            {isSavingConfig ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
+            保存
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
