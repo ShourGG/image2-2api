@@ -24,6 +24,7 @@ from services.auth_service import (
     paid_image_coin_cost_for_request,
 )
 from services.config import config
+from services.image_file_utils import sniff_image_mime_and_extension
 from services.openai_backend_api import CODEX_IMAGE_MODEL, OpenAIBackendAPI
 from services.proxy_service import proxy_settings
 from utils.helper import IMAGE_MODELS
@@ -370,8 +371,17 @@ def decode_image_input(image: str, default_name: str = "image") -> tuple[bytes, 
 
 def save_image_bytes(image_data: bytes, base_url: str | None = None) -> str:
     config.cleanup_old_images()
+    detected = sniff_image_mime_and_extension(image_data)
+    if not detected:
+        raise ImageGenerationError(
+            "upstream returned invalid image bytes",
+            status_code=502,
+            error_type="server_error",
+            code="invalid_upstream_image",
+        )
+    _mime_type, extension = detected
     file_hash = hashlib.md5(image_data).hexdigest()
-    filename = f"{int(time.time())}_{file_hash}.png"
+    filename = f"{int(time.time())}_{file_hash}{extension}"
     relative_dir = Path(time.strftime("%Y"), time.strftime("%m"), time.strftime("%d"))
     file_path = config.images_dir / relative_dir / filename
     file_path.parent.mkdir(parents=True, exist_ok=True)

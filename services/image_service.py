@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from services.config import config
+from services.image_file_utils import file_is_supported_image
 
 
 def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict[str, object]:
@@ -11,6 +12,8 @@ def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict
     root = config.images_dir
     for path in root.rglob("*"):
         if not path.is_file():
+            continue
+        if not file_is_supported_image(path):
             continue
         rel = path.relative_to(root).as_posix()
         parts = rel.split("/")

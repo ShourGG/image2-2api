@@ -21,6 +21,10 @@ from services.protocol.conversation import (
     uses_codex_image_backend,
 )
 
+TINY_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0uoAAAAASUVORK5CYII="
+)
+
 
 class ImageGenerationStrategyTests(unittest.TestCase):
     def test_gpt2api_strategy_uses_auto_for_free_accounts(self) -> None:
@@ -286,6 +290,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
     def test_openai_compatible_edits_use_multipart_upload(self) -> None:
         old_session = conversation_module.requests.Session
         old_mime = conversation_module.CurlMime
+        old_save_image_bytes = conversation_module.save_image_bytes
         old_data = dict(config.data)
 
         captured: dict[str, object] = {}
@@ -298,7 +303,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
                 return {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"fake-image").decode("ascii"),
+                            "b64_json": base64.b64encode(TINY_PNG_BYTES).decode("ascii"),
                             "revised_prompt": "edited",
                         }
                     ]
@@ -350,6 +355,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
             }
             conversation_module.requests.Session = FakeSession
             conversation_module.CurlMime = FakeMime
+            conversation_module.save_image_bytes = lambda _image_data, _base_url=None: "https://image.shour.fun/images/test.png"
 
             request = ConversationRequest(
                 prompt="edit image",
@@ -375,10 +381,12 @@ class ImageGenerationStrategyTests(unittest.TestCase):
             config.data = old_data
             conversation_module.requests.Session = old_session
             conversation_module.CurlMime = old_mime
+            conversation_module.save_image_bytes = old_save_image_bytes
 
     def test_openai_compatible_multi_edits_use_image_array_field_and_preserve_mime(self) -> None:
         old_session = conversation_module.requests.Session
         old_mime = conversation_module.CurlMime
+        old_save_image_bytes = conversation_module.save_image_bytes
         old_data = dict(config.data)
 
         captured: dict[str, object] = {}
@@ -391,7 +399,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
                 return {
                     "data": [
                         {
-                            "b64_json": base64.b64encode(b"fake-image").decode("ascii"),
+                            "b64_json": base64.b64encode(TINY_PNG_BYTES).decode("ascii"),
                             "revised_prompt": "edited",
                         }
                     ]
@@ -443,6 +451,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
             }
             conversation_module.requests.Session = FakeSession
             conversation_module.CurlMime = FakeMime
+            conversation_module.save_image_bytes = lambda _image_data, _base_url=None: "https://image.shour.fun/images/test.png"
 
             request = ConversationRequest(
                 prompt="edit image",
@@ -469,6 +478,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
             config.data = old_data
             conversation_module.requests.Session = old_session
             conversation_module.CurlMime = old_mime
+            conversation_module.save_image_bytes = old_save_image_bytes
 
 
 if __name__ == "__main__":
