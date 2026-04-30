@@ -206,7 +206,7 @@ export function ImageComposer({
 
             <div className="border-t border-stone-100 bg-white px-3 pb-3 pt-2 sm:px-6 sm:pb-4 sm:pt-4">
               <div className="flex items-end justify-between gap-2 sm:gap-3">
-                <div className="hide-scrollbar flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto pb-0.5 sm:flex-wrap sm:gap-3 sm:overflow-visible sm:pb-0">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 pb-0.5 sm:gap-3 sm:pb-0">
                   <Button
                     type="button"
                     variant="outline"
@@ -226,7 +226,7 @@ export function ImageComposer({
                     <span>模板库</span>
                   </Button>
                   <div
-                    className="inline-flex min-w-0 max-w-[62vw] items-center rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:max-w-[560px] sm:px-3 sm:py-2 sm:text-xs"
+                    className="order-first inline-flex min-w-0 max-w-full basis-full items-center justify-center rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:order-none sm:max-w-[560px] sm:basis-auto sm:justify-start sm:px-3 sm:py-2 sm:text-xs"
                     title={quotaHint ? `${quotaLabel} ${availableQuota} · ${quotaHint}` : `${quotaLabel} ${availableQuota}`}
                   >
                     <span className="hidden xs:inline shrink-0">{quotaLabel} </span>

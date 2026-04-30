@@ -64,12 +64,14 @@ function ImageManagerContent() {
           <div className="text-xs font-semibold tracking-[0.18em] text-stone-500 uppercase">Images</div>
           <h1 className="text-2xl font-semibold tracking-tight">图片管理</h1>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
-          <Button variant="outline" onClick={clearFilters} className="h-10 rounded-xl border-stone-200 bg-white px-4 text-stone-700">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+          <div className="col-span-2 sm:col-span-1">
+            <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
+          </div>
+          <Button variant="outline" onClick={clearFilters} className="h-10 w-full rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-auto">
             清除筛选条件
           </Button>
-          <Button onClick={() => void loadImages()} disabled={isLoading} className="h-10 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800">
+          <Button onClick={() => void loadImages()} disabled={isLoading} className="h-10 w-full rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800 sm:w-auto">
             {isLoading ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
             查询
           </Button>
@@ -143,8 +145,8 @@ function ImageManagerContent() {
               </div>
             )})}
           </div>
-          <div className="flex items-center justify-end gap-2 border-t border-stone-100 px-4 py-3 text-sm text-stone-500">
-            <span>第 {safePage} / {pageCount} 页，共 {items.length} 张</span>
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-stone-100 px-4 py-3 text-sm text-stone-500 sm:justify-end">
+            <span className="basis-full text-center sm:basis-auto">第 {safePage} / {pageCount} 页，共 {items.length} 张</span>
             <Button variant="outline" size="icon" className="size-9 rounded-lg border-stone-200 bg-white" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
               <ChevronLeft className="size-4" />
             </Button>

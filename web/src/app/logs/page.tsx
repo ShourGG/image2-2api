@@ -104,21 +104,23 @@ function LogsContent({ isAdmin }: { isAdmin: boolean }) {
           <div className="text-xs font-semibold tracking-[0.18em] text-stone-500 uppercase">Logs</div>
           <h1 className="text-2xl font-semibold tracking-tight">日志管理</h1>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
           {isAdmin ? (
             <Select value={type} onValueChange={(value) => setType(value as (typeof LogType)[keyof typeof LogType])}>
-              <SelectTrigger className="h-10 w-[150px] rounded-xl border-stone-200 bg-white"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 w-full rounded-xl border-stone-200 bg-white sm:w-[150px]"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={LogType.Call}>调用日志</SelectItem>
                 <SelectItem value={LogType.Account}>账号管理日志</SelectItem>
               </SelectContent>
             </Select>
           ) : null}
-          <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
-          <Button variant="outline" onClick={clearFilters} className="h-10 rounded-xl border-stone-200 bg-white px-4 text-stone-700">
+          <div className="col-span-2 sm:col-span-1">
+            <DateRangeFilter startDate={startDate} endDate={endDate} onChange={(start, end) => { setStartDate(start); setEndDate(end); }} />
+          </div>
+          <Button variant="outline" onClick={clearFilters} className="h-10 w-full rounded-xl border-stone-200 bg-white px-4 text-stone-700 sm:w-auto">
             清除筛选条件
           </Button>
-          <Button onClick={() => void loadLogs()} disabled={isLoading} className="h-10 rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800">
+          <Button onClick={() => void loadLogs()} disabled={isLoading} className="h-10 w-full rounded-xl bg-stone-950 px-4 text-white hover:bg-stone-800 sm:w-auto">
             {isLoading ? <LoaderCircle className="size-4 animate-spin" /> : <Search className="size-4" />}
             查询
           </Button>
@@ -134,7 +136,45 @@ function LogsContent({ isAdmin }: { isAdmin: boolean }) {
               刷新
             </Button>
           </div>
-          <div className="overflow-x-auto">
+          <div className="space-y-3 p-3 sm:hidden">
+            {currentRows.map((item, index) => (
+              <div key={`${item.time}-${index}`} className="rounded-2xl border border-stone-100 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <Badge variant="secondary" className="rounded-md">{typeLabels[item.type] || item.type}</Badge>
+                  {isCallLog ? (
+                    <Badge variant={item.detail?.status === "failed" ? "danger" : "success"} className="rounded-md">
+                      {getStatus(item)}
+                    </Badge>
+                  ) : null}
+                </div>
+                <div className="space-y-2 text-sm text-stone-600">
+                  <div className="flex justify-between gap-3">
+                    <span className="shrink-0 text-stone-400">时间</span>
+                    <span className="text-right font-medium text-stone-700">{item.time}</span>
+                  </div>
+                  {isCallLog ? (
+                    <>
+                      <div className="flex justify-between gap-3">
+                        <span className="shrink-0 text-stone-400">令牌</span>
+                        <span className="min-w-0 break-all text-right font-medium text-stone-700">{getDetailText(item, "key_name")}</span>
+                      </div>
+                      <div className="flex justify-between gap-3">
+                        <span className="shrink-0 text-stone-400">耗时</span>
+                        <span className="text-right font-medium text-stone-700">{formatDuration(item)}</span>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="rounded-xl bg-stone-50 px-3 py-2 text-sm leading-6 text-stone-600">
+                    {item.summary || "-"}
+                  </div>
+                </div>
+                <Button variant="outline" className="mt-3 h-10 w-full rounded-xl border-stone-200 bg-white text-stone-700" onClick={() => openDetail(item)}>
+                  查看详情
+                </Button>
+              </div>
+            ))}
+          </div>
+          <div className="hidden overflow-x-auto sm:block">
             <Table className="min-w-[820px]">
               <TableHeader>
                 <TableRow>
@@ -172,8 +212,8 @@ function LogsContent({ isAdmin }: { isAdmin: boolean }) {
               </TableBody>
             </Table>
           </div>
-          <div className="flex items-center justify-end gap-2 border-t border-stone-100 px-4 py-3 text-sm text-stone-500">
-            <span>第 {safePage} / {pageCount} 页，共 {items.length} 条</span>
+          <div className="flex flex-wrap items-center justify-center gap-2 border-t border-stone-100 px-4 py-3 text-sm text-stone-500 sm:justify-end">
+            <span className="basis-full text-center sm:basis-auto">第 {safePage} / {pageCount} 页，共 {items.length} 条</span>
             <Button variant="outline" size="icon" className="size-9 rounded-lg border-stone-200 bg-white" disabled={safePage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>
               <ChevronLeft className="size-4" />
             </Button>

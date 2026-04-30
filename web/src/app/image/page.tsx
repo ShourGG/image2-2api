@@ -629,8 +629,11 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
   const openAICompatibleUsagesRef = useRef<OpenAICompatibleUsageSummary[]>([]);
   const conversationsRef = useRef<ImageConversation[]>([]);
   const resultsViewportRef = useRef<HTMLDivElement>(null);
+  const resultsContentRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const autoFollowResultsRef = useRef(true);
+  const forceScrollToBottomRef = useRef(false);
   const lastAutoScrollConversationIdRef = useRef<string | null>(null);
   const lastAutoScrollTurnCountRef = useRef(0);
   const storageScope = useMemo(() => imageStorageScope(session), [session]);
@@ -808,6 +811,32 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     openAICompatibleUsagesRef.current = openAICompatibleUsages;
   }, [openAICompatibleUsages]);
 
+  const scrollResultsToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
+    const viewport = resultsViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const scroll = (nextBehavior: ScrollBehavior) => {
+      viewport.scrollTo({
+        top: viewport.scrollHeight,
+        behavior: nextBehavior,
+      });
+    };
+
+    scroll(behavior);
+    window.requestAnimationFrame(() => scroll(behavior));
+    window.setTimeout(() => scroll("auto"), 120);
+  }, []);
+
+  const handleResultsScroll = useCallback(() => {
+    const viewport = resultsViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    autoFollowResultsRef.current = isScrolledNearBottom(viewport, 140);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -980,6 +1009,8 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
     if (!selectedConversation) {
       lastAutoScrollConversationIdRef.current = null;
       lastAutoScrollTurnCountRef.current = 0;
+      autoFollowResultsRef.current = true;
+      forceScrollToBottomRef.current = false;
       return;
     }
 
@@ -992,20 +1023,53 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
 
     const conversationChanged = lastAutoScrollConversationIdRef.current !== selectedConversation.id;
     const turnCountChanged = lastAutoScrollTurnCountRef.current !== selectedConversation.turns.length;
-    const isTypingInComposer = typeof document !== "undefined" && document.activeElement === textareaRef.current;
+    const stats = getImageConversationStats(selectedConversation);
+    const hasActiveOutput = stats.queued > 0 || stats.running > 0;
+    const shouldForceScroll =
+      forceScrollToBottomRef.current || conversationChanged || turnCountChanged || hasActiveOutput;
 
-    // 仅在切换会话、新增轮次，或用户本来就停留在底部时跟随滚动。
-    // 任务轮询会频繁刷新 updatedAt；这里避免每次都 smooth scroll 导致输入框附近看起来抖动。
-    if (!isTypingInComposer && (conversationChanged || turnCountChanged || isScrolledNearBottom(viewport))) {
-      viewport.scrollTo({
-        top: viewport.scrollHeight,
-        behavior: conversationChanged || turnCountChanged ? "smooth" : "auto",
-      });
+    if (shouldForceScroll || autoFollowResultsRef.current || isScrolledNearBottom(viewport, 140)) {
+      scrollResultsToBottom(conversationChanged || turnCountChanged ? "smooth" : "auto");
+      autoFollowResultsRef.current = true;
+      forceScrollToBottomRef.current = false;
     }
 
     lastAutoScrollConversationIdRef.current = selectedConversation.id;
     lastAutoScrollTurnCountRef.current = selectedConversation.turns.length;
-  }, [selectedConversation?.id, selectedConversation?.turns.length, selectedConversation?.updatedAt]);
+  }, [
+    scrollResultsToBottom,
+    selectedConversation,
+    selectedConversation?.id,
+    selectedConversation?.turns.length,
+    selectedConversation?.updatedAt,
+  ]);
+
+  useEffect(() => {
+    const content = resultsContentRef.current;
+    if (!content) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      const viewport = resultsViewportRef.current;
+      if (!viewport) {
+        return;
+      }
+      const currentConversation = conversationsRef.current.find((item) => item.id === selectedConversationId) ?? null;
+      const stats = currentConversation ? getImageConversationStats(currentConversation) : null;
+      const hasActiveOutput = Boolean(stats && (stats.queued > 0 || stats.running > 0));
+      if (forceScrollToBottomRef.current || hasActiveOutput || autoFollowResultsRef.current || isScrolledNearBottom(viewport, 140)) {
+        scrollResultsToBottom("auto");
+        autoFollowResultsRef.current = true;
+        forceScrollToBottomRef.current = false;
+      }
+    });
+
+    observer.observe(content);
+    return () => {
+      observer.disconnect();
+    };
+  }, [scrollResultsToBottom, selectedConversationId]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1541,6 +1605,7 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
           turns: [draftTurn],
         };
 
+    forceScrollToBottomRef.current = true;
     setSelectedConversationId(conversationId);
     clearComposerInputs();
 
@@ -1632,14 +1697,17 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
 
           <div
             ref={resultsViewportRef}
+            onScroll={handleResultsScroll}
             className="hide-scrollbar min-h-0 flex-1 overflow-y-auto px-1 py-2 sm:px-4 sm:py-4"
           >
-            <ImageResults
-              selectedConversation={selectedConversation}
-              onOpenLightbox={openLightbox}
-              onContinueEdit={handleContinueEdit}
-              formatConversationTime={formatConversationTime}
-            />
+            <div ref={resultsContentRef} className="min-h-full">
+              <ImageResults
+                selectedConversation={selectedConversation}
+                onOpenLightbox={openLightbox}
+                onContinueEdit={handleContinueEdit}
+                formatConversationTime={formatConversationTime}
+              />
+            </div>
           </div>
 
           <ImageComposer
