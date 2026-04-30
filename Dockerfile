@@ -6,8 +6,8 @@ FROM --platform=$BUILDPLATFORM node:22-alpine AS web-build
 
 WORKDIR /app/web
 
-COPY web/package.json web/bun.lock ./
-RUN npm install
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
 
 COPY VERSION /app/VERSION
 COPY web ./

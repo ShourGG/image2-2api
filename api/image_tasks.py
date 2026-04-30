@@ -5,13 +5,14 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 import json
 
-from api.support import require_identity, resolve_image_base_url
+from api.support import ensure_upload_count, read_validated_image_upload, require_identity, resolve_image_base_url
+from services.image_file_utils import MAX_IMAGE_BATCH_TASKS, MAX_IMAGE_PROMPT_LENGTH, MAX_IMAGE_TASK_ID_LENGTH
 from services.image_task_service import image_task_service
 
 
 class ImageGenerationTaskRequest(BaseModel):
-    client_task_id: str = Field(..., min_length=1)
-    prompt: str = Field(..., min_length=1)
+    client_task_id: str = Field(..., min_length=1, max_length=MAX_IMAGE_TASK_ID_LENGTH)
+    prompt: str = Field(..., min_length=1, max_length=MAX_IMAGE_PROMPT_LENGTH)
     model: str = "gpt-image-2"
     size: str | None = None
     quality: str | None = None
@@ -19,8 +20,8 @@ class ImageGenerationTaskRequest(BaseModel):
 
 
 class ImageGenerationTaskBatchRequest(BaseModel):
-    client_task_ids: list[str] = Field(..., min_length=1)
-    prompt: str = Field(..., min_length=1)
+    client_task_ids: list[str] = Field(..., min_length=1, max_length=MAX_IMAGE_BATCH_TASKS)
+    prompt: str = Field(..., min_length=1, max_length=MAX_IMAGE_PROMPT_LENGTH)
     model: str = "gpt-image-2"
     size: str | None = None
     quality: str | None = None
@@ -46,6 +47,17 @@ def _normalize_client_task_ids(value: object) -> list[str]:
     if isinstance(value, list):
         return [str(item or "").strip() for item in value if str(item or "").strip()]
     return []
+
+
+def _validate_client_task_ids(value: list[str]) -> list[str]:
+    task_ids = [item for item in value if item]
+    if not task_ids:
+        raise HTTPException(status_code=400, detail={"error": "client_task_ids is required"})
+    if len(task_ids) > MAX_IMAGE_BATCH_TASKS:
+        raise HTTPException(status_code=400, detail={"error": f"too many image tasks, max {MAX_IMAGE_BATCH_TASKS}"})
+    if any(len(item) > MAX_IMAGE_TASK_ID_LENGTH for item in task_ids):
+        raise HTTPException(status_code=400, detail={"error": f"client_task_id is too long, max {MAX_IMAGE_TASK_ID_LENGTH}"})
+    return task_ids
 
 
 def create_router() -> APIRouter:
@@ -88,9 +100,7 @@ def create_router() -> APIRouter:
         authorization: str | None = Header(default=None),
     ):
         identity = require_identity(authorization)
-        task_ids = _normalize_client_task_ids(body.client_task_ids)
-        if not task_ids:
-            raise HTTPException(status_code=400, detail={"error": "client_task_ids is required"})
+        task_ids = _validate_client_task_ids(_normalize_client_task_ids(body.client_task_ids))
         try:
             return await run_in_threadpool(
                 image_task_service.submit_generation_batch,
@@ -112,8 +122,8 @@ def create_router() -> APIRouter:
         authorization: str | None = Header(default=None),
         image: list[UploadFile] | None = File(default=None),
         image_list: list[UploadFile] | None = File(default=None, alias="image[]"),
-        client_task_id: str = Form(...),
-        prompt: str = Form(...),
+        client_task_id: str = Form(..., max_length=MAX_IMAGE_TASK_ID_LENGTH),
+        prompt: str = Form(..., max_length=MAX_IMAGE_PROMPT_LENGTH),
         model: str = Form(default="gpt-image-2"),
         size: str | None = Form(default=None),
         quality: str | None = Form(default=None),
@@ -123,12 +133,10 @@ def create_router() -> APIRouter:
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
+        ensure_upload_count(uploads)
         images: list[tuple[bytes, str, str]] = []
         for upload in uploads:
-            image_data = await upload.read()
-            if not image_data:
-                raise HTTPException(status_code=400, detail={"error": "image file is empty"})
-            images.append((image_data, upload.filename or "image.png", upload.content_type or "image/png"))
+            images.append(await read_validated_image_upload(upload))
         try:
             return await run_in_threadpool(
                 image_task_service.submit_edit,
@@ -152,25 +160,21 @@ def create_router() -> APIRouter:
         image: list[UploadFile] | None = File(default=None),
         image_list: list[UploadFile] | None = File(default=None, alias="image[]"),
         client_task_ids: str = Form(...),
-        prompt: str = Form(...),
+        prompt: str = Form(..., max_length=MAX_IMAGE_PROMPT_LENGTH),
         model: str = Form(default="gpt-image-2"),
         size: str | None = Form(default=None),
         quality: str | None = Form(default=None),
         generation_mode: str | None = Form(default=None),
     ):
         identity = require_identity(authorization)
-        normalized_task_ids = _normalize_client_task_ids(client_task_ids)
-        if not normalized_task_ids:
-            raise HTTPException(status_code=400, detail={"error": "client_task_ids is required"})
+        normalized_task_ids = _validate_client_task_ids(_normalize_client_task_ids(client_task_ids))
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
+        ensure_upload_count(uploads)
         images: list[tuple[bytes, str, str]] = []
         for upload in uploads:
-            image_data = await upload.read()
-            if not image_data:
-                raise HTTPException(status_code=400, detail={"error": "image file is empty"})
-            images.append((image_data, upload.filename or "image.png", upload.content_type or "image/png"))
+            images.append(await read_validated_image_upload(upload))
         try:
             return await run_in_threadpool(
                 image_task_service.submit_edit_batch,

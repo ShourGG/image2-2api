@@ -9,6 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from services.config import DATA_DIR, config
+from services.image_file_utils import (
+    MAX_IMAGE_BATCH_TASKS,
+    MAX_IMAGE_PROMPT_LENGTH,
+    MAX_IMAGE_TASK_ID_LENGTH,
+    MAX_PENDING_IMAGE_TASKS_PER_OWNER,
+    MAX_PENDING_IMAGE_TASKS_TOTAL,
+)
 from services.log_service import LOG_TYPE_CALL, log_service
 from services.protocol import openai_v1_image_edit, openai_v1_image_generations
 
@@ -137,6 +144,7 @@ class ImageTaskService:
         quality: str | None = None,
         generation_mode: str | None = None,
     ) -> dict[str, Any]:
+        self._validate_prompt(prompt)
         payload = {
             "prompt": prompt,
             "model": model,
@@ -162,6 +170,8 @@ class ImageTaskService:
         quality: str | None = None,
         generation_mode: str | None = None,
     ) -> dict[str, Any]:
+        self._validate_batch(client_task_ids)
+        self._validate_prompt(prompt)
         items = [
             self.submit_generation(
                 identity,
@@ -190,6 +200,7 @@ class ImageTaskService:
         quality: str | None = None,
         generation_mode: str | None = None,
     ) -> dict[str, Any]:
+        self._validate_prompt(prompt)
         payload = {
             "prompt": prompt,
             "images": images,
@@ -217,6 +228,8 @@ class ImageTaskService:
         quality: str | None = None,
         generation_mode: str | None = None,
     ) -> dict[str, Any]:
+        self._validate_batch(client_task_ids)
+        self._validate_prompt(prompt)
         items = [
             self.submit_edit(
                 identity,
@@ -268,6 +281,8 @@ class ImageTaskService:
         task_id = _clean(client_task_id)
         if not task_id:
             raise ValueError("client_task_id is required")
+        if len(task_id) > MAX_IMAGE_TASK_ID_LENGTH:
+            raise ValueError(f"client_task_id is too long, max {MAX_IMAGE_TASK_ID_LENGTH}")
         owner = _owner_id(identity)
         key = _task_key(owner, task_id)
         now = _now_iso()
@@ -279,6 +294,7 @@ class ImageTaskService:
                 if cleaned:
                     self._save_locked()
                 return self._public_task_locked(task)
+            self._ensure_task_capacity_locked(owner)
             task = {
                 "id": task_id,
                 "owner_id": owner,
@@ -305,6 +321,33 @@ class ImageTaskService:
             )
             thread.start()
         return public_task
+
+    def _validate_prompt(self, prompt: str) -> None:
+        if not _clean(prompt):
+            raise ValueError("prompt is required")
+        if len(str(prompt or "")) > MAX_IMAGE_PROMPT_LENGTH:
+            raise ValueError(f"prompt is too long, max {MAX_IMAGE_PROMPT_LENGTH}")
+
+    def _validate_batch(self, client_task_ids: list[str]) -> None:
+        task_ids = [_clean(task_id) for task_id in client_task_ids if _clean(task_id)]
+        if not task_ids:
+            raise ValueError("client_task_ids is required")
+        if len(task_ids) > MAX_IMAGE_BATCH_TASKS:
+            raise ValueError(f"too many image tasks, max {MAX_IMAGE_BATCH_TASKS}")
+        if any(len(task_id) > MAX_IMAGE_TASK_ID_LENGTH for task_id in task_ids):
+            raise ValueError(f"client_task_id is too long, max {MAX_IMAGE_TASK_ID_LENGTH}")
+
+    def _ensure_task_capacity_locked(self, owner: str) -> None:
+        unfinished = [
+            task
+            for task in self._tasks.values()
+            if task.get("status") in UNFINISHED_STATUSES
+        ]
+        if len(unfinished) >= MAX_PENDING_IMAGE_TASKS_TOTAL:
+            raise ValueError("too many pending image tasks, please retry later")
+        owner_unfinished = sum(1 for task in unfinished if task.get("owner_id") == owner)
+        if owner_unfinished >= MAX_PENDING_IMAGE_TASKS_PER_OWNER:
+            raise ValueError("too many pending image tasks for this account")
 
     def _run_task(self, key: str, mode: str, payload: dict[str, Any]) -> None:
         started = time.time()

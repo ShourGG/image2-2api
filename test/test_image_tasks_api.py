@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 import unittest
 from unittest import mock
@@ -13,6 +14,9 @@ import api.image_tasks as image_tasks_module
 
 
 AUTH_HEADERS = {"Authorization": "Bearer chatgpt2api"}
+TINY_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0uoAAAAASUVORK5CYII="
+)
 
 
 class FakeImageTaskService:
@@ -122,8 +126,8 @@ class ImageTasksApiTests(unittest.TestCase):
             headers=AUTH_HEADERS,
             data={"client_task_id": "edit-1", "prompt": "edit", "model": "gpt-image-2", "quality": "xhigh"},
             files=[
-                ("image", ("one.png", b"one", "image/png")),
-                ("image", ("two.png", b"two", "image/png")),
+                ("image", ("one.png", TINY_PNG_BYTES, "image/png")),
+                ("image", ("two.png", TINY_PNG_BYTES, "image/png")),
             ],
         )
 
@@ -163,8 +167,8 @@ class ImageTasksApiTests(unittest.TestCase):
                 "quality": "xhigh",
             },
             files=[
-                ("image", ("one.png", b"one", "image/png")),
-                ("image", ("two.png", b"two", "image/png")),
+                ("image", ("one.png", TINY_PNG_BYTES, "image/png")),
+                ("image", ("two.png", TINY_PNG_BYTES, "image/png")),
             ],
         )
 

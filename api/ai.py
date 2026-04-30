@@ -4,7 +4,8 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Request, Uploa
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 
-from api.support import require_identity, resolve_image_base_url
+from api.support import ensure_upload_count, read_validated_image_upload, require_identity, resolve_image_base_url
+from services.image_file_utils import MAX_IMAGE_PROMPT_LENGTH
 from services.log_service import LoggedCall
 from services.protocol import (
     anthropic_v1_messages,
@@ -17,7 +18,7 @@ from services.protocol import (
 
 
 class ImageGenerationRequest(BaseModel):
-    prompt: str = Field(..., min_length=1)
+    prompt: str = Field(..., min_length=1, max_length=MAX_IMAGE_PROMPT_LENGTH)
     model: str = "gpt-image-2"
     n: int = Field(default=1, ge=1, le=4)
     size: str | None = None
@@ -91,7 +92,7 @@ def create_router() -> APIRouter:
             authorization: str | None = Header(default=None),
             image: list[UploadFile] | None = File(default=None),
             image_list: list[UploadFile] | None = File(default=None, alias="image[]"),
-            prompt: str = Form(...),
+            prompt: str = Form(..., max_length=MAX_IMAGE_PROMPT_LENGTH),
             model: str = Form(default="gpt-image-2"),
             n: int = Form(default=1),
             size: str | None = Form(default=None),
@@ -106,12 +107,10 @@ def create_router() -> APIRouter:
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
+        ensure_upload_count(uploads)
         images: list[tuple[bytes, str, str]] = []
         for upload in uploads:
-            image_data = await upload.read()
-            if not image_data:
-                raise HTTPException(status_code=400, detail={"error": "image file is empty"})
-            images.append((image_data, upload.filename or "image.png", upload.content_type or "image/png"))
+            images.append(await read_validated_image_upload(upload))
         payload = {
             "prompt": prompt,
             "images": images,

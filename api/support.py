@@ -3,11 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from threading import Event, Thread
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, UploadFile
 
 from services.account_service import account_service
 from services.auth_service import auth_service
 from services.config import config
+from services.image_file_utils import (
+    MAX_UPLOAD_IMAGE_BYTES,
+    MAX_UPLOAD_IMAGE_COUNT,
+    sniff_image_mime_and_extension,
+)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST_DIR = BASE_DIR / "web_dist"
@@ -57,6 +62,33 @@ def raise_image_quota_error(exc: Exception) -> None:
     if "pool is busy" in message.lower() or "正在忙碌" in message:
         raise HTTPException(status_code=429, detail={"error": message or "free image pool is busy, please retry later"}) from exc
     raise HTTPException(status_code=502, detail={"error": message}) from exc
+
+
+def ensure_upload_count(uploads: list[UploadFile]) -> None:
+    if len(uploads) > MAX_UPLOAD_IMAGE_COUNT:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": f"too many image files, max {MAX_UPLOAD_IMAGE_COUNT}"},
+        )
+
+
+async def read_validated_image_upload(upload: UploadFile) -> tuple[bytes, str, str]:
+    image_data = await upload.read(MAX_UPLOAD_IMAGE_BYTES + 1)
+    if not image_data:
+        raise HTTPException(status_code=400, detail={"error": "image file is empty"})
+    if len(image_data) > MAX_UPLOAD_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"error": f"image file is too large, max {MAX_UPLOAD_IMAGE_BYTES // 1024 // 1024}MB"},
+        )
+    detected = sniff_image_mime_and_extension(image_data)
+    if not detected:
+        raise HTTPException(status_code=400, detail={"error": "invalid image file"})
+    mime_type, extension = detected
+    filename = Path(str(upload.filename or f"image{extension}")).name or f"image{extension}"
+    if "." not in filename:
+        filename = f"{filename}{extension}"
+    return image_data, mime_type, filename
 
 
 def sanitize_cpa_pool(pool: dict | None) -> dict | None:
