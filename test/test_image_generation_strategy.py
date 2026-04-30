@@ -147,6 +147,7 @@ class ImageGenerationStrategyTests(unittest.TestCase):
         old_data = dict(config.data)
         old_handler = conversation_module.openai_compatible_image_outputs
         old_active_counts = dict(conversation_module._openai_image_active_counts)
+        old_cooldowns = dict(conversation_module._openai_image_cooldown_until)
         lock = threading.Lock()
         active = 0
         max_seen = 0
@@ -205,6 +206,82 @@ class ImageGenerationStrategyTests(unittest.TestCase):
             config.data = old_data
             conversation_module.openai_compatible_image_outputs = old_handler
             conversation_module._openai_image_active_counts = old_active_counts
+            conversation_module._openai_image_cooldown_until = old_cooldowns
+
+    def test_openai_compatible_busy_upstreams_wait_instead_of_failing(self) -> None:
+        old_data = dict(config.data)
+        old_handler = conversation_module.openai_compatible_image_outputs
+        old_active_counts = dict(conversation_module._openai_image_active_counts)
+        old_cooldowns = dict(conversation_module._openai_image_cooldown_until)
+        old_retry_seconds = conversation_module.OPENAI_COMPATIBLE_BUSY_RETRY_SECONDS
+        attempts: dict[str, int] = {}
+
+        def fake_outputs(_request: ConversationRequest, index: int, total: int, upstream):
+            upstream_id = str(upstream.get("id") or "")
+            attempts[upstream_id] = attempts.get(upstream_id, 0) + 1
+            if attempts[upstream_id] == 1:
+                raise conversation_module.ImageGenerationError(
+                    f"{upstream.get('name')} 失败：HTTP 429 Concurrency limit exceeded for account, please retry later",
+                    status_code=429,
+                    error_type="rate_limit_error",
+                    code="upstream_rate_limit",
+                    retry_after_seconds=0.05,
+                )
+            yield ImageOutput(
+                kind="result",
+                model="gpt-image-2",
+                index=index,
+                total=total,
+                data=[{"b64_json": "ZmFrZQ==", "revised_prompt": "busy-then-ok"}],
+            )
+
+        try:
+            config.data = {
+                **old_data,
+                "image_generation_strategy": "openai_compatible",
+                "image_generation_api_max_concurrency": 8,
+                "image_generation_api_upstreams": [
+                    {
+                        "id": "upstream-1",
+                        "name": "上游 1",
+                        "base_url": "https://example.com/1",
+                        "api_key": "sk-test-1",
+                        "model": "gpt-image-2",
+                        "max_concurrency": 8,
+                        "enabled": True,
+                    },
+                    {
+                        "id": "upstream-2",
+                        "name": "上游 2",
+                        "base_url": "https://example.com/2",
+                        "api_key": "sk-test-2",
+                        "model": "gpt-image-2",
+                        "max_concurrency": 8,
+                        "enabled": True,
+                    },
+                ],
+            }
+            conversation_module.openai_compatible_image_outputs = fake_outputs
+            conversation_module._openai_image_active_counts = {}
+            conversation_module._openai_image_cooldown_until = {}
+            conversation_module.OPENAI_COMPATIBLE_BUSY_RETRY_SECONDS = 0.05
+
+            started = time.time()
+            result = collect_image_outputs(
+                stream_image_outputs_with_pool(ConversationRequest(prompt="cat", model="gpt-image-2"))
+            )
+            elapsed = time.time() - started
+
+            self.assertEqual(len(result["data"]), 1)
+            self.assertGreaterEqual(attempts.get("upstream-1", 0), 1)
+            self.assertGreaterEqual(attempts.get("upstream-2", 0), 1)
+            self.assertGreater(elapsed, 0.04)
+        finally:
+            config.data = old_data
+            conversation_module.openai_compatible_image_outputs = old_handler
+            conversation_module._openai_image_active_counts = old_active_counts
+            conversation_module._openai_image_cooldown_until = old_cooldowns
+            conversation_module.OPENAI_COMPATIBLE_BUSY_RETRY_SECONDS = old_retry_seconds
 
     def test_openai_compatible_edits_use_multipart_upload(self) -> None:
         old_session = conversation_module.requests.Session

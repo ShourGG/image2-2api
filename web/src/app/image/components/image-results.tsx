@@ -207,6 +207,9 @@ export function ImageResults({
                       {typeof turn.queueTotal === "number" ? (
                         <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">当前队列 {turn.queueTotal}</span>
                       ) : null}
+                      {turn.generationMode === "paid" ? (
+                        <span className="rounded-full bg-sky-50 px-3 py-1 text-sky-700">上游忙碌会自动切换并等待重试</span>
+                      ) : null}
                       {typeof turn.queueAhead === "number" ? (
                         <span className="rounded-full bg-amber-50 px-3 py-1 text-amber-700">前方 {turn.queueAhead} 个任务</span>
                       ) : null}
@@ -363,14 +366,24 @@ export function ImageResults({
                             )}
                           </div>
                           <div className="space-y-1">
-                            <p className="text-sm">{turn.status === "queued" ? "正在排队中..." : "正在处理图片..."}</p>
+                            <p className="text-sm">
+                              {turn.status === "queued"
+                                ? turn.generationMode === "paid"
+                                  ? "上游忙碌或排队中..."
+                                  : "正在排队中..."
+                                : "正在处理图片..."}
+                            </p>
                             {turn.status === "queued" && typeof turn.estimatedWaitSeconds === "number" ? (
                               <p className="text-xs text-stone-400">
                                 {typeof turn.queueAhead === "number" ? `前方 ${turn.queueAhead} 个任务 · ` : ""}
                                 预计等待 {formatQueueEta(turn.estimatedWaitSeconds)}
                               </p>
                             ) : turn.status === "queued" ? (
-                              <p className="text-xs text-stone-400">等待当前对话中的前序任务完成</p>
+                              <p className="text-xs text-stone-400">
+                                {turn.generationMode === "paid"
+                                  ? "命中上游并发上限后会自动切换上游，并在全部忙碌时等待重试"
+                                  : "等待当前对话中的前序任务完成"}
+                              </p>
                             ) : null}
                           </div>
                         </div>

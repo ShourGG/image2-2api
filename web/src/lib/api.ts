@@ -19,6 +19,17 @@ export type ImageApiUpstream = {
   enabled: boolean;
 };
 
+export type ImageApiUpstreamRuntimeStatus = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  status: "available" | "busy" | "cooldown" | "disabled";
+  active_count: number;
+  max_concurrency: number;
+  available_slots: number;
+  cooldown_remaining_seconds: number;
+};
+
 export type Account = {
   id: string;
   access_token: string;
@@ -638,9 +649,16 @@ export async function updateSettingsConfig(settings: SettingsConfig) {
 }
 
 export async function fetchImageApiUpstreamUsage(upstreamId: string) {
-  return httpRequest<{ result: { ok: boolean; status: number; usage?: unknown; error?: unknown } }>(
+  return httpRequest<{
+    result: { ok: boolean; status: number; usage?: unknown; error?: unknown };
+    runtime: ImageApiUpstreamRuntimeStatus;
+  }>(
     `/api/settings/image-upstreams/${encodeURIComponent(upstreamId)}/usage`,
   );
+}
+
+export async function fetchImageApiUpstreamStatuses() {
+  return httpRequest<{ items: ImageApiUpstreamRuntimeStatus[] }>("/api/settings/image-upstreams/status");
 }
 
 export async function fetchManagedImages(filters: { start_date?: string; end_date?: string }) {

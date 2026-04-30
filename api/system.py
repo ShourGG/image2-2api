@@ -22,6 +22,10 @@ from services.image_service import list_images
 from services.log_service import log_service
 from services.proxy_service import proxy_settings
 from services.proxy_service import test_proxy
+from services.protocol.conversation import (
+    list_openai_compatible_upstream_runtime_states,
+    openai_compatible_upstream_runtime_state,
+)
 from services.rate_limit_service import RateLimitRule, rate_limit_service
 
 
@@ -390,7 +394,12 @@ def create_router(app_version: str) -> APIRouter:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         except Exception as exc:
             result = {"ok": False, "status": 0, "error": str(exc) or exc.__class__.__name__}
-        return {"result": result}
+        return {"result": result, "runtime": openai_compatible_upstream_runtime_state(upstream)}
+
+    @router.get("/api/settings/image-upstreams/status")
+    async def image_upstream_statuses(authorization: str | None = Header(default=None)):
+        require_admin(authorization)
+        return {"items": list_openai_compatible_upstream_runtime_states()}
 
     @router.get("/api/images")
     async def get_images(request: Request, start_date: str = "", end_date: str = "", authorization: str | None = Header(default=None)):

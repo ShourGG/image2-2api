@@ -38,12 +38,14 @@ class ImageGenerationError(Exception):
         error_type: str = "server_error",
         code: str | None = "upstream_error",
         param: str | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.error_type = error_type
         self.code = code
         self.param = param
+        self.retry_after_seconds = retry_after_seconds
 
     def to_openai_error(self) -> dict[str, Any]:
         return {
@@ -172,6 +174,8 @@ def refund_image_billing(identity: dict[str, Any] | None, charge: ImageBillingCh
 
 _openai_image_limit_condition = threading.Condition()
 _openai_image_active_counts: dict[str, int] = {}
+_openai_image_cooldown_until: dict[str, float] = {}
+OPENAI_COMPATIBLE_BUSY_RETRY_SECONDS = 8.0
 
 
 def enabled_openai_compatible_image_upstreams() -> list[dict[str, Any]]:
@@ -200,8 +204,75 @@ def openai_compatible_image_queue_capacity() -> int:
     return max(1, sum(openai_compatible_upstream_max_concurrency(item) for item in upstreams))
 
 
+def is_openai_compatible_upstream_busy_error(error: object) -> bool:
+    text = str(error or "").lower()
+    return (
+        "concurrency limit exceeded" in text
+        or ("http 429" in text and "retry later" in text)
+        or ("http 429" in text and "concurrent" in text)
+    )
+
+
+def openai_compatible_upstream_runtime_state(upstream: dict[str, Any]) -> dict[str, Any]:
+    upstream_id = openai_compatible_upstream_id(upstream)
+    enabled = bool(upstream.get("enabled", True))
+    max_concurrency = openai_compatible_upstream_max_concurrency(upstream)
+    with _openai_image_limit_condition:
+        now = time.time()
+        cooldown_until = float(_openai_image_cooldown_until.get(upstream_id, 0.0) or 0.0)
+        if cooldown_until > 0 and cooldown_until <= now:
+            _openai_image_cooldown_until.pop(upstream_id, None)
+            cooldown_until = 0.0
+        active_count = max(0, int(_openai_image_active_counts.get(upstream_id, 0) or 0))
+
+    cooldown_remaining_seconds = max(0, int(round(cooldown_until - time.time()))) if cooldown_until > 0 else 0
+    available_slots = max(0, max_concurrency - active_count)
+    if not enabled:
+        status = "disabled"
+    elif cooldown_remaining_seconds > 0:
+        status = "cooldown"
+        available_slots = 0
+    elif active_count >= max_concurrency:
+        status = "busy"
+        available_slots = 0
+    else:
+        status = "available"
+
+    return {
+        "id": upstream_id,
+        "name": str(upstream.get("name") or upstream_id or "OpenAI兼容上游").strip() or "OpenAI兼容上游",
+        "enabled": enabled,
+        "status": status,
+        "active_count": active_count,
+        "max_concurrency": max_concurrency,
+        "available_slots": available_slots,
+        "cooldown_remaining_seconds": cooldown_remaining_seconds,
+    }
+
+
+def list_openai_compatible_upstream_runtime_states(upstreams: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    items = list(upstreams or config.image_generation_api_upstreams or [])
+    return [openai_compatible_upstream_runtime_state(item) for item in items if isinstance(item, dict)]
+
+
+def mark_openai_compatible_upstream_busy(upstream: dict[str, Any], retry_after_seconds: float | None = None) -> None:
+    wait_seconds = retry_after_seconds
+    if wait_seconds is None or wait_seconds <= 0:
+        wait_seconds = OPENAI_COMPATIBLE_BUSY_RETRY_SECONDS
+    cooldown_until = time.time() + max(1.0, float(wait_seconds))
+    with _openai_image_limit_condition:
+        upstream_id = openai_compatible_upstream_id(upstream)
+        _openai_image_cooldown_until[upstream_id] = max(_openai_image_cooldown_until.get(upstream_id, 0.0), cooldown_until)
+        _openai_image_limit_condition.notify_all()
+
+
 def _openai_image_slot_available_locked(upstream: dict[str, Any]) -> bool:
     upstream_id = openai_compatible_upstream_id(upstream)
+    cooldown_until = float(_openai_image_cooldown_until.get(upstream_id, 0.0) or 0.0)
+    if cooldown_until > 0:
+        if cooldown_until > time.time():
+            return False
+        _openai_image_cooldown_until.pop(upstream_id, None)
     active_count = _openai_image_active_counts.get(upstream_id, 0)
     return active_count < openai_compatible_upstream_max_concurrency(upstream)
 
@@ -561,6 +632,7 @@ def openai_compatible_image_outputs(
 
         if response.status_code >= 400:
             message = response.text[:1000]
+            retry_after_seconds: float | None = None
             try:
                 body = response.json()
                 error = body.get("error") if isinstance(body, dict) else None
@@ -570,7 +642,19 @@ def openai_compatible_image_outputs(
                     message = str(body.get("message") or message)
             except Exception:
                 pass
-            raise ImageGenerationError(f"{upstream_name} 失败：HTTP {response.status_code} {message}")
+            retry_after_header = str(response.headers.get("Retry-After") or "").strip()
+            if retry_after_header:
+                try:
+                    retry_after_seconds = float(retry_after_header)
+                except ValueError:
+                    retry_after_seconds = None
+            raise ImageGenerationError(
+                f"{upstream_name} 失败：HTTP {response.status_code} {message}",
+                status_code=response.status_code,
+                error_type="rate_limit_error" if response.status_code == 429 else "server_error",
+                code="upstream_rate_limit" if response.status_code == 429 else "upstream_error",
+                retry_after_seconds=retry_after_seconds,
+            )
 
         body = response.json()
         raw_data = body.get("data") if isinstance(body, dict) else None
@@ -645,6 +729,25 @@ def openai_compatible_image_outputs_with_failover(
             return
         except Exception as exc:
             last_error = str(exc) or exc.__class__.__name__
+            if is_openai_compatible_upstream_busy_error(exc):
+                retry_after_seconds = exc.retry_after_seconds if isinstance(exc, ImageGenerationError) else None
+                mark_openai_compatible_upstream_busy(upstream, retry_after_seconds)
+                logger.warning({
+                    "event": "openai_compatible_image_upstream_busy",
+                    "upstream_id": str(upstream.get("id") or ""),
+                    "upstream_name": str(upstream.get("name") or ""),
+                    "error": last_error,
+                    "retry_after_seconds": retry_after_seconds or OPENAI_COMPATIBLE_BUSY_RETRY_SECONDS,
+                })
+                yield ImageOutput(
+                    kind="progress",
+                    model=request.model,
+                    index=index,
+                    total=total,
+                    text="上游并发已满，正在切换或排队等待空闲槽位...",
+                    upstream_event_type="openai_compatible.busy",
+                )
+                continue
             tried_upstream_ids.add(openai_compatible_upstream_id(upstream))
             logger.warning({
                 "event": "openai_compatible_image_upstream_failed",

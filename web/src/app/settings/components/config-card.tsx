@@ -1,7 +1,7 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import { LoaderCircle, PlugZap, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
-import { useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { bindAdminAccount, fetchImageApiUpstreamUsage, testProxy, type ProxyTestResult } from "@/lib/api";
+import {
+  bindAdminAccount,
+  fetchImageApiUpstreamStatuses,
+  fetchImageApiUpstreamUsage,
+  testProxy,
+  type ImageApiUpstreamRuntimeStatus,
+  type ProxyTestResult,
+} from "@/lib/api";
 
 import { useSettingsStore } from "../store";
 
@@ -62,11 +69,44 @@ function formatUpstreamUsageResult(result: { ok: boolean; status: number; usage?
   return parts.length > 0 ? parts.join("；") : `查询成功：${JSON.stringify(usage)}`;
 }
 
+function formatUpstreamRuntimeStatus(status: ImageApiUpstreamRuntimeStatus | undefined) {
+  if (!status) {
+    return "运行状态读取中...";
+  }
+  if (status.status === "disabled") {
+    return "运行状态：已停用";
+  }
+  if (status.status === "cooldown") {
+    return `运行状态：冷却中，约 ${status.cooldown_remaining_seconds} 秒后重试；本地占用 ${status.active_count}/${status.max_concurrency}`;
+  }
+  if (status.status === "busy") {
+    return `运行状态：本地槽位已满；本地占用 ${status.active_count}/${status.max_concurrency}`;
+  }
+  return `运行状态：可用；本地占用 ${status.active_count}/${status.max_concurrency}，剩余槽位 ${status.available_slots}`;
+}
+
+function runtimeBadgeTone(status: ImageApiUpstreamRuntimeStatus | undefined) {
+  if (!status) return "bg-stone-100 text-stone-600";
+  if (status.status === "cooldown") return "bg-amber-50 text-amber-700";
+  if (status.status === "busy") return "bg-rose-50 text-rose-700";
+  if (status.status === "disabled") return "bg-stone-100 text-stone-600";
+  return "bg-emerald-50 text-emerald-700";
+}
+
+function runtimeBadgeLabel(status: ImageApiUpstreamRuntimeStatus | undefined) {
+  if (!status) return "读取中";
+  if (status.status === "cooldown") return `冷却中 ${status.cooldown_remaining_seconds}s`;
+  if (status.status === "busy") return "本地满载";
+  if (status.status === "disabled") return "已停用";
+  return "可用";
+}
+
 export function ConfigCard() {
   const [isTestingProxy, setIsTestingProxy] = useState(false);
   const [proxyTestResult, setProxyTestResult] = useState<ProxyTestResult | null>(null);
   const [testingUpstreamId, setTestingUpstreamId] = useState("");
   const [upstreamUsageResults, setUpstreamUsageResults] = useState<Record<string, string>>({});
+  const [upstreamRuntimeStatuses, setUpstreamRuntimeStatuses] = useState<Record<string, ImageApiUpstreamRuntimeStatus>>({});
   const [adminBindName, setAdminBindName] = useState("");
   const [adminBindEmail, setAdminBindEmail] = useState("");
   const [adminBindPassword, setAdminBindPassword] = useState("");
@@ -88,6 +128,13 @@ export function ConfigCard() {
   const setProxy = useSettingsStore((state) => state.setProxy);
   const setBaseUrl = useSettingsStore((state) => state.setBaseUrl);
   const saveConfig = useSettingsStore((state) => state.saveConfig);
+  const upstreamStatusKey = useMemo(
+    () =>
+      (config?.image_generation_api_upstreams || [])
+        .map((item) => `${item.id}:${item.enabled !== false}:${item.max_concurrency || ""}`)
+        .join("|"),
+    [config?.image_generation_api_upstreams],
+  );
   const authRateLimitGroups = [
     {
       title: "登录限流",
@@ -176,6 +223,10 @@ export function ConfigCard() {
     setUpstreamUsageResults((current) => ({ ...current, [upstreamId]: "查询中..." }));
     try {
       const data = await fetchImageApiUpstreamUsage(upstreamId);
+      setUpstreamRuntimeStatuses((current) => ({
+        ...current,
+        [upstreamId]: data.runtime,
+      }));
       setUpstreamUsageResults((current) => ({
         ...current,
         [upstreamId]: formatUpstreamUsageResult(data.result),
@@ -189,6 +240,33 @@ export function ConfigCard() {
       setTestingUpstreamId("");
     }
   };
+
+  useEffect(() => {
+    if (config?.image_generation_strategy !== "openai_compatible") {
+      setUpstreamRuntimeStatuses({});
+      return;
+    }
+    let cancelled = false;
+    const loadStatuses = async () => {
+      try {
+        const data = await fetchImageApiUpstreamStatuses();
+        if (cancelled) return;
+        setUpstreamRuntimeStatuses(
+          Object.fromEntries(data.items.map((item) => [item.id, item])),
+        );
+      } catch {
+        if (cancelled) return;
+      }
+    };
+    void loadStatuses();
+    const timer = window.setInterval(() => {
+      void loadStatuses();
+    }, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [config?.image_generation_strategy, upstreamStatusKey]);
 
   const handleBindAdminAccount = async () => {
     const normalizedEmail = adminBindEmail.trim();
@@ -445,6 +523,14 @@ export function ConfigCard() {
                       删除
                     </Button>
                   </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={`rounded-full px-3 py-1 ${runtimeBadgeTone(upstreamRuntimeStatuses[upstream.id])}`}>
+                      {runtimeBadgeLabel(upstreamRuntimeStatuses[upstream.id])}
+                    </span>
+                    <span className="rounded-full bg-stone-100 px-3 py-1 text-stone-600">
+                      配置上限 {Number(upstream.max_concurrency || 0) > 0 ? upstream.max_concurrency : 8}
+                    </span>
+                  </div>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div>
                       <label className="text-sm text-stone-700">名称</label>
@@ -496,7 +582,10 @@ export function ConfigCard() {
                     />
                     <p className="mt-1 text-xs text-stone-500">保存后不会回显；留空会保留旧 key。新填/修改 key 后请先保存再查额度。</p>
                   </div>
-                  <div className="text-xs text-stone-500">这个上游自己能抗多少并发就填多少；满了以后会自动排队，也会优先尝试其他还有空位的上游。</div>
+                  <div className="space-y-1 text-xs text-stone-500">
+                    <div>这个上游自己能抗多少并发就填多少；满了以后会自动排队，也会优先尝试其他还有空位的上游。</div>
+                    <div>{formatUpstreamRuntimeStatus(upstreamRuntimeStatuses[upstream.id])}</div>
+                  </div>
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="text-xs leading-6 text-stone-500">
                       {upstreamUsageResults[upstream.id] || (upstream.api_key_set ? "可查询 /v1/usage 额度" : "未保存 key")}
