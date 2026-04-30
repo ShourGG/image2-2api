@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 import api.app as app_module
 import api.system as system_module
 from services.rate_limit_service import RateLimitResult
+from services.public_error import sanitize_public_error_message
 
 
 class _DummyThread:
@@ -66,6 +67,9 @@ class AppSecurityHardeningTests(unittest.TestCase):
                 self.assertEqual(client.get("/docs").status_code, 404)
                 self.assertEqual(client.get("/robots.txt").status_code, 404)
                 self.assertEqual(client.get("/api/config").status_code, 404)
+                self.assertEqual(client.get("/.env").status_code, 404)
+                self.assertEqual(client.head("/.env").status_code, 404)
+                self.assertEqual(client.get("/unknown-probe").status_code, 404)
 
                 allowed = client.options(
                     "/auth/login",
@@ -84,6 +88,16 @@ class AppSecurityHardeningTests(unittest.TestCase):
                     },
                 )
                 self.assertIsNone(blocked.headers.get("access-control-allow-origin"))
+
+    def test_public_error_sanitizer_removes_internal_details(self) -> None:
+        self.assertEqual(
+            sanitize_public_error_message("HTTP 429 Concurrency limit exceeded for account"),
+            "上游并发繁忙，系统会排队或稍后重试",
+        )
+        self.assertEqual(
+            sanitize_public_error_message("Traceback in /root/chatgpt2api/config.json"),
+            "服务处理失败，请稍后重试",
+        )
 
 
 class AuthSecurityHardeningTests(unittest.TestCase):

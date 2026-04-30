@@ -13,6 +13,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from services.config import DATA_DIR
+from services.public_error import sanitize_public_error_message
 from utils.helper import anthropic_sse_stream, sse_json_stream
 
 LOG_TYPE_CALL = "call"
@@ -65,6 +66,10 @@ class LogService:
                 detail = item.get("detail") if isinstance(item.get("detail"), dict) else {}
                 if str(detail.get("key_id") or "").strip() != identity_id:
                     continue
+                if "error" in detail:
+                    detail = dict(detail)
+                    detail["error"] = sanitize_public_error_message(detail.get("error"))
+                    item = {**item, "detail": detail}
             if start_date and day < start_date:
                 continue
             if end_date and day > end_date:
@@ -101,7 +106,7 @@ def _image_error_response(exc: Exception) -> JSONResponse:
             status_code=429,
             content={
                 "error": {
-                    "message": message or "no available image quota",
+                    "message": sanitize_public_error_message(message),
                     "type": "insufficient_quota",
                     "param": None,
                     "code": "insufficient_quota",
@@ -113,7 +118,7 @@ def _image_error_response(exc: Exception) -> JSONResponse:
             status_code=429,
             content={
                 "error": {
-                    "message": message or "free image pool is busy, please retry later",
+                    "message": sanitize_public_error_message(message),
                     "type": "rate_limit_error",
                     "param": None,
                     "code": "image_pool_busy",
@@ -126,7 +131,7 @@ def _image_error_response(exc: Exception) -> JSONResponse:
         status_code=502,
         content={
             "error": {
-                "message": message,
+                "message": sanitize_public_error_message(message),
                 "type": "server_error",
                 "param": None,
                 "code": "upstream_error",
@@ -163,7 +168,7 @@ class LoggedCall:
             raise
         except Exception as exc:
             self.log("调用失败", status="failed", error=str(exc))
-            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+            raise HTTPException(status_code=502, detail={"error": sanitize_public_error_message(exc)}) from exc
 
         if isinstance(result, dict):
             self.log("调用完成", result)
@@ -180,7 +185,7 @@ class LoggedCall:
             raise
         except Exception as exc:
             self.log("调用失败", status="failed", error=str(exc))
-            raise HTTPException(status_code=502, detail={"error": str(exc)}) from exc
+            raise HTTPException(status_code=502, detail={"error": sanitize_public_error_message(exc)}) from exc
         if not has_first:
             self.log("流式调用结束")
             return StreamingResponse(sender(()), media_type="text/event-stream")

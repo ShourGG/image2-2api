@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from threading import Event
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,15 +13,59 @@ from api import accounts, ai, image_tasks, register, shares, system
 from api.support import resolve_web_asset, start_limited_account_watcher
 from services.config import config
 
+SPA_FALLBACK_ROUTES = {
+    "",
+    "_not-found",
+    "account",
+    "accounts",
+    "image",
+    "image-manager",
+    "login",
+    "logs",
+    "register",
+    "settings",
+    "share",
+    "signup",
+}
+
+BLOCKED_PUBLIC_PATHS = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".git",
+    ".git/config",
+    ".svn",
+    "config",
+    "config.json",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "package.json",
+    "package-lock.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "server-status",
+}
+
+
+def _has_hidden_segment(clean_path: str) -> bool:
+    return any(part.startswith(".") for part in clean_path.split("/") if part)
+
 
 def _should_bypass_spa_fallback(clean_path: str) -> bool:
     if not clean_path:
         return False
+    normalized = clean_path.rstrip("/")
+    if normalized in SPA_FALLBACK_ROUTES:
+        return False
+    if normalized.lower() in BLOCKED_PUBLIC_PATHS or _has_hidden_segment(normalized):
+        return True
     if clean_path.startswith(("_next/", "api/")):
         return True
     if clean_path in {"docs", "redoc"}:
         return True
-    return bool(Path(clean_path).suffix)
+    if Path(clean_path).suffix:
+        return True
+    return True
 
 
 def _resolve_web_response(full_path: str, *, head_only: bool = False):
@@ -67,6 +111,18 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allow_headers=["Accept", "Authorization", "Content-Type", "Origin"],
     )
+
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "same-origin")
+        response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+        if request.url.path.endswith(".txt") or request.url.path.endswith(".html"):
+            response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+        return response
+
     app.include_router(ai.create_router())
     app.include_router(accounts.create_router())
     app.include_router(image_tasks.create_router())

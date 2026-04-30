@@ -17,6 +17,7 @@ from services.image_file_utils import (
     MAX_PENDING_IMAGE_TASKS_TOTAL,
 )
 from services.log_service import LOG_TYPE_CALL, log_service
+from services.public_error import sanitize_public_error_message
 from services.protocol import openai_v1_image_edit, openai_v1_image_generations
 
 TASK_STATUS_QUEUED = "queued"
@@ -103,7 +104,7 @@ def _base_public_task(task: dict[str, Any]) -> dict[str, Any]:
     if task.get("data") is not None:
         item["data"] = task.get("data")
     if task.get("error"):
-        item["error"] = task.get("error")
+        item["error"] = sanitize_public_error_message(task.get("error"))
     return item
 
 

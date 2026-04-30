@@ -13,6 +13,7 @@ from services.image_file_utils import (
     MAX_UPLOAD_IMAGE_COUNT,
     sniff_image_mime_and_extension,
 )
+from services.public_error import sanitize_public_error_message
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST_DIR = BASE_DIR / "web_dist"
@@ -58,10 +59,10 @@ def resolve_image_base_url(request: Request) -> str:
 def raise_image_quota_error(exc: Exception) -> None:
     message = str(exc)
     if "no available image quota" in message.lower():
-        raise HTTPException(status_code=429, detail={"error": message or "no available image quota"}) from exc
+        raise HTTPException(status_code=429, detail={"error": sanitize_public_error_message(message)}) from exc
     if "pool is busy" in message.lower() or "正在忙碌" in message:
-        raise HTTPException(status_code=429, detail={"error": message or "free image pool is busy, please retry later"}) from exc
-    raise HTTPException(status_code=502, detail={"error": message}) from exc
+        raise HTTPException(status_code=429, detail={"error": sanitize_public_error_message(message)}) from exc
+    raise HTTPException(status_code=502, detail={"error": sanitize_public_error_message(message)}) from exc
 
 
 def ensure_upload_count(uploads: list[UploadFile]) -> None:

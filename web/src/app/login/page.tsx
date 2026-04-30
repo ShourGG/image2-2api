@@ -155,8 +155,7 @@ export default function LoginPage() {
           {setupRequired ? (
             <div className="space-y-4">
               <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
-                后台密钥就是服务器环境变量 <span className="font-mono">CHATGPT2API_AUTH_KEY</span>。这里只在首次初始化时使用一次，
-                绑定完成后不会再在登录页显示。
+                部署密钥只在首次初始化时使用一次。绑定完成后不会再在登录页显示。
               </div>
 
               <div className="space-y-2">
@@ -236,7 +235,7 @@ export default function LoginPage() {
                         void handleSetup();
                       }
                     }}
-                    placeholder="输入 CHATGPT2API_AUTH_KEY"
+                    placeholder="输入首次部署时配置的密钥"
                     className="h-13 rounded-2xl border-stone-200 bg-white pl-11"
                     autoComplete="off"
                   />
