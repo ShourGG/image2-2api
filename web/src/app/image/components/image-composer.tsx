@@ -1,5 +1,5 @@
 "use client";
-import { ArrowUp, BookOpen, Check, ChevronDown, ImagePlus, LoaderCircle, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, ChevronDown, ImagePlus, LoaderCircle, Ruler, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ClipboardEvent, type RefObject } from "react";
 
 import { ImageLightbox } from "@/components/image-lightbox";
@@ -80,11 +80,22 @@ export function ImageComposer({
     { value: "1152x2048", label: "2K 1152x2048 竖图" },
     { value: "2560x1440", label: "2K 2560x1440 横图" },
     { value: "1440x2560", label: "2K 1440x2560 竖图" },
-    { value: "3840x2160", label: "4K 3840x2160 横图" },
-    { value: "2160x3840", label: "4K 2160x3840 竖图" },
+    { value: "2480x2480", label: "4K 1:1 2480x2480 方图" },
+    { value: "3312x1872", label: "4K 16:9 3312x1872 横图 推荐" },
+    { value: "1872x3312", label: "4K 9:16 1872x3312 竖图 推荐" },
+    { value: "3056x2032", label: "4K 3:2 3056x2032 横图" },
+    { value: "2032x3056", label: "4K 2:3 2032x3056 竖图" },
+    { value: "2880x2160", label: "4K 4:3 2880x2160 横图" },
+    { value: "2160x2880", label: "4K 3:4 2160x2880 竖图" },
+    { value: "2784x2224", label: "4K 5:4 2784x2224 横图" },
+    { value: "2224x2784", label: "4K 4:5 2224x2784 竖图" },
+    { value: "3808x1632", label: "4K 21:9 3808x1632 宽屏" },
+    { value: "3840x2160", label: "极限 4K 3840x2160 横图 不推荐" },
+    { value: "2160x3840", label: "极限 4K 2160x3840 竖图 不推荐" },
   ];
   const imageSizeOptions = generationMode === "free" ? allImageSizeOptions.slice(0, 4) : allImageSizeOptions;
   const imageSizeLabel = imageSizeOptions.find((option) => option.value === imageSize)?.label || "未指定";
+  const imageSizeDisplayLabel = formatImageSizeDisplayLabel(imageSizeLabel);
   const imageQualityOptions: Array<{ value: ImageQuality; label: string }> = generationMode === "free" ? [
     { value: "standard", label: "标准" },
   ] : [
@@ -124,7 +135,7 @@ export function ImageComposer({
 
   return (
     <div className="shrink-0 flex justify-center px-1 sm:px-0">
-      <div style={{ width: "min(980px, 100%)" }}>
+      <div className="w-full max-w-[1040px]">
         <input
           ref={fileInputRef}
           type="file"
@@ -171,7 +182,7 @@ export function ImageComposer({
           </div>
         ) : null}
 
-        <div className="rounded-[24px] border border-stone-200 bg-white shadow-[0_14px_60px_-42px_rgba(15,23,42,0.45)] sm:rounded-[32px] sm:shadow-none">
+        <div className="overflow-visible rounded-[24px] border border-white/85 bg-white/90 shadow-[0_20px_80px_-48px_rgba(15,23,42,0.55)] ring-1 ring-stone-900/[0.03] backdrop-blur sm:rounded-[28px]">
           <div
             className="relative cursor-text"
             onClick={() => {
@@ -201,16 +212,16 @@ export function ImageComposer({
                   void onSubmit();
                 }
               }}
-              className="min-h-[82px] resize-none rounded-[24px] border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-6 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:min-h-[148px] sm:rounded-[32px] sm:px-6 sm:pt-6 sm:pb-6 sm:leading-7"
+              className="min-h-[82px] resize-none rounded-[24px] border-0 bg-transparent px-4 pt-4 pb-2 text-[15px] leading-6 text-stone-900 shadow-none placeholder:text-stone-400 focus-visible:ring-0 sm:min-h-[140px] sm:rounded-[28px] sm:px-6 sm:pt-6 sm:pb-5 sm:leading-7"
             />
 
-            <div className="border-t border-stone-100 bg-white px-3 pb-3 pt-2 sm:px-6 sm:pb-4 sm:pt-4">
+            <div className="border-t border-stone-100/90 bg-stone-50/75 px-3 pb-3 pt-2 sm:px-5 sm:pb-4 sm:pt-4">
               <div className="flex items-end justify-between gap-2 sm:gap-3">
                 <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 pb-0.5 sm:gap-3 sm:pb-0">
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 shrink-0 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    className="h-9 shrink-0 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-sm shadow-stone-900/[0.03] transition hover:border-stone-300 hover:bg-white sm:h-10 sm:px-4 sm:text-sm"
                     onClick={onPickReferenceImage}
                   >
                     <ImagePlus className="size-3.5 sm:size-4" />
@@ -219,14 +230,14 @@ export function ImageComposer({
                   <Button
                     type="button"
                     variant="outline"
-                    className="h-9 shrink-0 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-none sm:h-10 sm:px-4 sm:text-sm"
+                    className="h-9 shrink-0 rounded-full border-stone-200 bg-white px-3 text-xs font-medium text-stone-700 shadow-sm shadow-stone-900/[0.03] transition hover:border-stone-300 hover:bg-white sm:h-10 sm:px-4 sm:text-sm"
                     onClick={onOpenPromptLibrary}
                   >
                     <BookOpen className="size-3.5 sm:size-4" />
                     <span>模板库</span>
                   </Button>
                   <div
-                    className="order-first inline-flex min-w-0 max-w-full basis-full items-center justify-center rounded-full bg-stone-100 px-2 py-1 text-[10px] font-medium text-stone-600 sm:order-none sm:max-w-[560px] sm:basis-auto sm:justify-start sm:px-3 sm:py-2 sm:text-xs"
+                    className="order-first inline-flex min-w-0 max-w-full basis-full items-center justify-center rounded-full border border-stone-200/80 bg-white/80 px-2 py-1 text-[10px] font-medium text-stone-600 sm:order-none sm:max-w-[560px] sm:basis-auto sm:justify-start sm:px-3 sm:py-2 sm:text-xs"
                     title={quotaHint ? `${quotaLabel} ${availableQuota} · ${quotaHint}` : `${quotaLabel} ${availableQuota}`}
                   >
                     <span className="hidden xs:inline shrink-0">{quotaLabel} </span>
@@ -276,22 +287,23 @@ export function ImageComposer({
                   </div>
                   <div
                     ref={sizeMenuRef}
-                    className="relative flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:h-auto sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
+                    className="relative flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] shadow-sm shadow-stone-900/[0.03] sm:h-auto sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
                   >
-                    <span className="font-medium text-stone-700 sm:text-sm">比例</span>
+                    <Ruler className="size-3.5 shrink-0 text-stone-500 sm:size-4" />
+                    <span className="font-medium text-stone-700 sm:text-sm">尺寸</span>
                     <button
                       type="button"
-                      className="flex h-7 w-[78px] items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 min-[390px]:w-[96px] sm:h-8 sm:w-[132px]"
+                      className="flex h-7 w-[152px] items-center justify-between bg-transparent text-left text-xs font-bold text-stone-700 min-[390px]:w-[172px] sm:h-8 sm:w-[236px]"
                       onClick={() => {
                         setIsQualityMenuOpen(false);
                         setIsSizeMenuOpen((open) => !open);
                       }}
                     >
-                      <span className="truncate">{imageSizeLabel}</span>
+                      <span className="truncate">{imageSizeDisplayLabel}</span>
                       <ChevronDown className={cn("size-4 shrink-0 opacity-60 transition", isSizeMenuOpen && "rotate-180")} />
                     </button>
                     {isSizeMenuOpen ? (
-                      <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+5.75rem)] z-[80] max-h-[45dvh] overflow-y-auto rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:absolute sm:inset-x-auto sm:bottom-[calc(100%+10px)] sm:left-0 sm:w-[186px]">
+                      <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom)+5.75rem)] z-[80] max-h-[50dvh] overflow-y-auto rounded-3xl border border-white/80 bg-white p-2 shadow-[0_24px_80px_-32px_rgba(15,23,42,0.35)] sm:absolute sm:inset-x-auto sm:bottom-[calc(100%+10px)] sm:right-0 sm:w-[420px]">
                         {imageSizeOptions.map((option) => {
                           const active = option.value === imageSize;
                           return (
@@ -299,7 +311,7 @@ export function ImageComposer({
                               key={option.label}
                               type="button"
                               className={cn(
-                                "flex w-full items-center justify-between rounded-2xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100",
+                                "flex w-full items-center justify-between gap-3 rounded-2xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-100",
                                 active && "bg-stone-100 font-medium text-stone-950",
                               )}
                               onClick={() => {
@@ -307,7 +319,10 @@ export function ImageComposer({
                                 setIsSizeMenuOpen(false);
                               }}
                             >
-                              <span>{option.label}</span>
+                              <span className="flex min-w-0 items-center gap-2.5">
+                                <ImageSizeOptionIcon value={option.value} />
+                                <span className="min-w-0 whitespace-normal leading-5">{option.label}</span>
+                              </span>
                               {active ? <Check className="size-4" /> : null}
                             </button>
                           );
@@ -317,7 +332,7 @@ export function ImageComposer({
                   </div>
                   <div
                     ref={qualityMenuRef}
-                    className="relative flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] sm:h-auto sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
+                    className="relative flex h-9 shrink-0 items-center gap-1.5 rounded-full border border-stone-200 bg-white px-2 py-0.5 text-[11px] shadow-sm shadow-stone-900/[0.03] sm:h-auto sm:gap-2 sm:px-3 sm:py-1 sm:text-[13px]"
                   >
                     <span className="font-medium text-stone-700 sm:text-sm">画质</span>
                     <button
@@ -363,7 +378,7 @@ export function ImageComposer({
                   type="button"
                   onClick={() => void onSubmit()}
                   disabled={!prompt.trim()}
-                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 sm:size-11"
+                  className="inline-flex size-10 shrink-0 items-center justify-center rounded-full bg-stone-950 text-white shadow-[0_14px_30px_-16px_rgba(15,23,42,0.8)] transition hover:-translate-y-0.5 hover:bg-stone-800 disabled:cursor-not-allowed disabled:bg-stone-300 disabled:shadow-none sm:size-11"
                   aria-label={referenceImages.length > 0 ? "编辑图片" : "生成图片"}
                 >
                   <ArrowUp className="size-3.5 sm:size-4" />
@@ -375,4 +390,66 @@ export function ImageComposer({
       </div>
     </div>
   );
+}
+
+function formatImageSizeDisplayLabel(label: string) {
+  if (!label || label === "未指定") {
+    return label;
+  }
+  return label
+    .replace(" 横图 推荐", " 推荐")
+    .replace(" 竖图 推荐", " 推荐")
+    .replace(" 横图 不推荐", " 不推荐")
+    .replace(" 竖图 不推荐", " 不推荐")
+    .replace(" 横图", "")
+    .replace(" 竖图", "")
+    .replace(" 方图", "")
+    .replace(" 宽屏", "");
+}
+
+function ImageSizeOptionIcon({ value }: { value: string }) {
+  const dimensions = parseImageSize(value);
+  if (!dimensions) {
+    return (
+      <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+        <Ruler className="size-3.5" />
+      </span>
+    );
+  }
+
+  const { width, height } = dimensions;
+  const ratio = width / height;
+  const maxWidth = 20;
+  const maxHeight = 20;
+  let iconWidth = maxWidth;
+  let iconHeight = Math.round(maxWidth / ratio);
+  if (iconHeight > maxHeight) {
+    iconHeight = maxHeight;
+    iconWidth = Math.round(maxHeight * ratio);
+  }
+  iconWidth = Math.max(7, iconWidth);
+  iconHeight = Math.max(7, iconHeight);
+
+  return (
+    <span className="inline-flex size-6 shrink-0 items-center justify-center rounded-full bg-stone-100 text-stone-500">
+      <span
+        className="rounded-[3px] border border-current bg-white/70 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.6)]"
+        style={{ width: iconWidth, height: iconHeight }}
+        aria-hidden="true"
+      />
+    </span>
+  );
+}
+
+function parseImageSize(value: string) {
+  const match = value.match(/^(\d+)x(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  return { width, height };
 }

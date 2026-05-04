@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict
@@ -23,10 +25,15 @@ from services.log_service import log_service
 from services.proxy_service import proxy_settings
 from services.proxy_service import test_proxy
 from services.protocol.conversation import (
+    ConversationRequest,
+    ImageGenerationError,
     list_openai_compatible_upstream_runtime_states,
+    openai_compatible_image_outputs,
     openai_compatible_upstream_runtime_state,
 )
 from services.rate_limit_service import RateLimitRule, rate_limit_service
+
+DEFAULT_IMAGE_UPSTREAM_TEST_PROMPT = "一张简洁的测试图片：白色背景上有一个蓝色圆形和清晰的 TEST 字样。"
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -35,6 +42,12 @@ class SettingsUpdateRequest(BaseModel):
 
 class ProxyTestRequest(BaseModel):
     url: str = ""
+
+
+class ImageUpstreamGenerationTestRequest(BaseModel):
+    prompt: str = DEFAULT_IMAGE_UPSTREAM_TEST_PROMPT
+    size: str = "1024x1024"
+    quality: str = ""
 
 
 class LoginRequest(BaseModel):
@@ -232,25 +245,18 @@ def _query_openai_compatible_usage(upstream: dict[str, object]) -> dict[str, obj
         raise ValueError("api_key is required")
     session = Session(**proxy_settings.build_session_kwargs(impersonate="edge101", verify=False))
     try:
-        response = session.get(
-            f"{base_url}/v1/usage",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Accept": "application/json",
-            },
-            timeout=20,
-        )
-        payload: object
-        try:
-            payload = response.json()
-        except Exception:
-            payload = response.text[:1000]
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+        }
+        response = session.get(f"{base_url}/v1/usage", headers=headers, timeout=20)
+        payload = _read_usage_response_payload(response)
         if response.status_code >= 400:
-            return {
-                "ok": False,
-                "status": response.status_code,
-                "error": payload,
-            }
+            if _is_new_api_missing_v1_usage(response, payload):
+                fallback = _query_new_api_token_usage(session, base_url, headers)
+                if fallback is not None:
+                    return fallback
+            return {"ok": False, "status": response.status_code, "error": payload}
         return {
             "ok": True,
             "status": response.status_code,
@@ -258,6 +264,136 @@ def _query_openai_compatible_usage(upstream: dict[str, object]) -> dict[str, obj
         }
     finally:
         session.close()
+
+
+def _read_usage_response_payload(response) -> object:
+    try:
+        return response.json()
+    except Exception:
+        return response.text[:1000]
+
+
+def _is_new_api_missing_v1_usage(response, payload: object) -> bool:
+    if not str(response.headers.get("X-New-Api-Version") or "").strip():
+        return False
+    if response.status_code not in {400, 404, 405}:
+        return False
+    message = ""
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            message = str(error.get("message") or "")
+        else:
+            message = str(payload.get("message") or "")
+    else:
+        message = str(payload or "")
+    return "/v1/usage" in message and "invalid url" in message.lower()
+
+
+def _query_new_api_token_usage(session: Session, base_url: str, headers: dict[str, str]) -> dict[str, object] | None:
+    response = session.get(f"{base_url.rstrip('/')}/api/usage/token/", headers=headers, timeout=20)
+    payload = _read_usage_response_payload(response)
+    if response.status_code >= 400:
+        return {"ok": False, "status": response.status_code, "error": payload}
+    if not isinstance(payload, dict):
+        return {"ok": False, "status": response.status_code, "error": payload}
+
+    if payload.get("success") is False or payload.get("code") is False:
+        return {"ok": False, "status": response.status_code, "error": payload}
+
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return {"ok": False, "status": response.status_code, "error": payload}
+
+    quota = _new_api_numeric(data.get("total_granted") if data.get("total_granted") is not None else data.get("quota"))
+    used_quota = _new_api_numeric(data.get("total_used") if data.get("total_used") is not None else (data.get("used_quota") or data.get("used")))
+    available_quota = _new_api_numeric(
+        data.get("total_available")
+        if data.get("total_available") is not None
+        else (data.get("remain_quota") if data.get("remain_quota") is not None else data.get("remaining_quota"))
+    )
+    unlimited_quota = bool(data.get("unlimited_quota"))
+    quota_per_unit = _new_api_quota_per_unit(base_url)
+    remaining_quota = available_quota
+    if remaining_quota is None and quota is not None:
+        remaining_quota = max(0.0, quota - (used_quota or 0.0))
+    if unlimited_quota:
+        remaining_quota = None
+    remaining = None if remaining_quota is None else remaining_quota / quota_per_unit
+    used = None if used_quota is None else used_quota / quota_per_unit
+    limit_quota = quota if quota is not None else (
+        (remaining_quota or 0.0) + used_quota
+        if remaining_quota is not None and used_quota is not None
+        else None
+    )
+    limit = None if limit_quota is None else limit_quota / quota_per_unit
+
+    usage = {
+        "mode": "new_api_token",
+        "unit": "USD",
+        "balance": remaining,
+        "remaining": remaining,
+        "quota": {
+            "remaining": remaining,
+            "used": used,
+            "limit": limit,
+            "unit": "USD",
+            "unlimited": unlimited_quota,
+        },
+        "raw": {
+            "quota": quota,
+            "used_quota": used_quota,
+            "remaining_quota": remaining_quota,
+            "unlimited_quota": unlimited_quota,
+            "quota_per_unit": quota_per_unit,
+        },
+    }
+    if unlimited_quota:
+        usage["balance"] = None
+        usage["remaining"] = None
+    return {"ok": True, "status": response.status_code, "usage": usage}
+
+
+def _new_api_numeric(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number
+
+
+def _new_api_quota_per_unit(base_url: str) -> float:
+    host = urlsplit(base_url).netloc.lower()
+    if "gettoken.dev" in host:
+        return 1.0
+    return 500000.0
+
+
+def _test_openai_compatible_image_upstream(
+    upstream: dict[str, object],
+    *,
+    prompt: str,
+    size: str,
+    quality: str,
+    base_url: str,
+) -> dict[str, object]:
+    final_prompt = str(prompt or "").strip() or DEFAULT_IMAGE_UPSTREAM_TEST_PROMPT
+    request = ConversationRequest(
+        model=str(upstream.get("model") or config.image_generation_api_model or "gpt-image-2").strip() or "gpt-image-2",
+        prompt=final_prompt,
+        size=str(size or "").strip() or "1024x1024",
+        quality=str(quality or "").strip(),
+        response_format="url",
+        base_url=base_url,
+    )
+    for output in openai_compatible_image_outputs(request, 1, 1, upstream):
+        if output.kind == "result":
+            return {
+                "ok": True,
+                "prompt": final_prompt,
+                "data": output.data,
+            }
+    raise ImageGenerationError("上游没有返回测试图片")
 
 
 def create_router(app_version: str) -> APIRouter:
@@ -390,6 +526,40 @@ def create_router(app_version: str) -> APIRouter:
             raise HTTPException(status_code=404, detail={"error": "upstream not found"})
         try:
             result = await run_in_threadpool(_query_openai_compatible_usage, upstream)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+        except Exception as exc:
+            result = {"ok": False, "status": 0, "error": str(exc) or exc.__class__.__name__}
+        return {"result": result, "runtime": openai_compatible_upstream_runtime_state(upstream)}
+
+    @router.post("/api/settings/image-upstreams/{upstream_id}/test-image")
+    async def image_upstream_test_image(
+        upstream_id: str,
+        request: Request,
+        body: ImageUpstreamGenerationTestRequest | None = None,
+        authorization: str | None = Header(default=None),
+    ):
+        require_admin(authorization)
+        upstream = config.get_image_generation_api_upstream(upstream_id)
+        if upstream is None:
+            raise HTTPException(status_code=404, detail={"error": "upstream not found"})
+        payload = body or ImageUpstreamGenerationTestRequest()
+        try:
+            result = await run_in_threadpool(
+                _test_openai_compatible_image_upstream,
+                upstream,
+                prompt=payload.prompt,
+                size=payload.size,
+                quality=payload.quality,
+                base_url=resolve_image_base_url(request),
+            )
+        except ImageGenerationError as exc:
+            result = {
+                "ok": False,
+                "status": exc.status_code,
+                "error": str(exc) or exc.__class__.__name__,
+                "code": exc.code,
+            }
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         except Exception as exc:

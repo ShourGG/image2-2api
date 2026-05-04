@@ -16,6 +16,13 @@ DATA_DIR = BASE_DIR / "data"
 CONFIG_FILE = BASE_DIR / "config.json"
 VERSION_FILE = BASE_DIR / "VERSION"
 IMAGE_GENERATION_STRATEGIES = {"chatgpt2api", "gpt2api", "codex_responses", "openai_compatible"}
+DEFAULT_LINUXDO_PAY_PACKAGES = [
+    {"id": "coin_1", "name": "体验充值", "amount": "1.00", "coins": 100, "description": "小额测试，到账 100 图币。", "enabled": True},
+    {"id": "coin_10", "name": "基础包", "amount": "10.00", "coins": 1000, "description": "到账 1000 图币。", "enabled": True},
+    {"id": "coin_30", "name": "常用包", "amount": "30.00", "coins": 3300, "description": "额外赠送 300 图币。", "enabled": True},
+    {"id": "coin_50", "name": "高清包", "amount": "50.00", "coins": 6000, "description": "额外赠送 1000 图币。", "enabled": True},
+    {"id": "coin_100", "name": "重度包", "amount": "100.00", "coins": 12500, "description": "额外赠送 2500 图币。", "enabled": True},
+]
 
 
 @dataclass(frozen=True)
@@ -87,6 +94,37 @@ def _coerce_non_negative_int(value: object, default: int) -> int:
     except (TypeError, ValueError):
         normalized = default
     return max(0, normalized)
+
+
+def _normalize_money_text(value: object, default: str = "0.00") -> str:
+    try:
+        from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
+        amount = Decimal(str(value if value is not None else default)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except (InvalidOperation, TypeError, ValueError):
+        amount = Decimal(default).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if amount < 0:
+        amount = Decimal("0.00")
+    return format(amount, "f")
+
+
+def _normalize_linuxdo_pay_package(raw: object) -> dict[str, object] | None:
+    source = raw if isinstance(raw, dict) else {}
+    package_id = str(source.get("id") or "").strip()
+    if not package_id:
+        return None
+    amount = _normalize_money_text(source.get("amount"), "0.00")
+    coins = _coerce_non_negative_int(source.get("coins"), 0)
+    if amount == "0.00" or coins <= 0:
+        return None
+    return {
+        "id": package_id,
+        "name": str(source.get("name") or package_id).strip() or package_id,
+        "amount": amount,
+        "coins": coins,
+        "description": str(source.get("description") or "").strip(),
+        "enabled": bool(source.get("enabled", True)),
+    }
 
 
 def _normalize_origin(value: object) -> str:
@@ -179,6 +217,13 @@ class ConfigStore:
             return 30
 
     @property
+    def image_poll_timeout_secs(self) -> int:
+        try:
+            return max(1, int(self.data.get("image_poll_timeout_secs", 120)))
+        except (TypeError, ValueError):
+            return 120
+
+    @property
     def auth_rate_limit_login_ip_limit(self) -> int:
         return _coerce_non_negative_int(self.data.get("auth_rate_limit_login_ip_limit", 30), 30)
 
@@ -229,6 +274,26 @@ class ConfigStore:
             return []
         allowed = {"debug", "info", "warning", "error"}
         return [level for item in levels if (level := str(item or "").strip().lower()) in allowed]
+
+    @property
+    def sensitive_words(self) -> list[str]:
+        words = self.data.get("sensitive_words")
+        if not isinstance(words, list):
+            return []
+        return [word for item in words if (word := str(item or "").strip())]
+
+    @property
+    def ai_review(self) -> dict[str, object]:
+        value = self.data.get("ai_review")
+        if not isinstance(value, dict):
+            value = {}
+        return {
+            "enabled": _coerce_bool(value.get("enabled", False), False),
+            "base_url": str(value.get("base_url") or "").strip().rstrip("/"),
+            "api_key": str(value.get("api_key") or "").strip(),
+            "model": str(value.get("model") or "").strip(),
+            "prompt": str(value.get("prompt") or "").strip(),
+        }
 
     @property
     def image_generation_strategy(self) -> str:
@@ -395,15 +460,19 @@ class ConfigStore:
     def cleanup_old_images(self) -> int:
         cutoff = time.time() - self.image_retention_days * 86400
         removed = 0
-        for path in self.images_dir.rglob("*"):
-            if path.is_file() and path.stat().st_mtime < cutoff:
-                path.unlink()
-                removed += 1
-        for path in sorted((p for p in self.images_dir.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
-            try:
-                path.rmdir()
-            except OSError:
-                pass
+        roots = [self.images_dir, DATA_DIR / "image_thumbnails"]
+        for root in roots:
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if path.is_file() and path.stat().st_mtime < cutoff:
+                    path.unlink()
+                    removed += 1
+            for path in sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda p: len(p.parts), reverse=True):
+                try:
+                    path.rmdir()
+                except OSError:
+                    pass
         return removed
 
     @property
@@ -413,6 +482,76 @@ class ConfigStore:
             or self.data.get("base_url")
             or ""
         ).strip().rstrip("/")
+
+    @property
+    def linuxdo_pay_enabled(self) -> bool:
+        value = os.getenv("CHATGPT2API_LINUXDO_PAY_ENABLED")
+        if value is None:
+            value = self.data.get("linuxdo_pay_enabled", False)
+        return _coerce_bool(value, False)
+
+    @property
+    def linuxdo_pay_pid(self) -> str:
+        return str(
+            os.getenv("CHATGPT2API_LINUXDO_PAY_PID")
+            or self.data.get("linuxdo_pay_pid")
+            or ""
+        ).strip()
+
+    @property
+    def linuxdo_pay_key(self) -> str:
+        return str(
+            os.getenv("CHATGPT2API_LINUXDO_PAY_KEY")
+            or self.data.get("linuxdo_pay_key")
+            or ""
+        ).strip()
+
+    @property
+    def linuxdo_pay_gateway(self) -> str:
+        value = str(
+            os.getenv("CHATGPT2API_LINUXDO_PAY_GATEWAY")
+            or self.data.get("linuxdo_pay_gateway")
+            or "https://credit.linux.do"
+        ).strip().rstrip("/")
+        return value or "https://credit.linux.do"
+
+    @property
+    def linuxdo_pay_type(self) -> str:
+        return str(
+            os.getenv("CHATGPT2API_LINUXDO_PAY_TYPE")
+            or self.data.get("linuxdo_pay_type")
+            or "epay"
+        ).strip() or "epay"
+
+    @property
+    def linuxdo_pay_sitename(self) -> str:
+        return str(
+            os.getenv("CHATGPT2API_LINUXDO_PAY_SITENAME")
+            or self.data.get("linuxdo_pay_sitename")
+            or "shour生成图"
+        ).strip() or "shour生成图"
+
+    @property
+    def linuxdo_pay_submit_url(self) -> str:
+        gateway = self.linuxdo_pay_gateway.rstrip("/")
+        if gateway.endswith(".php"):
+            return gateway
+        return f"{gateway}/epay/pay/submit.php"
+
+    @property
+    def linuxdo_pay_packages(self) -> list[dict[str, object]]:
+        raw = self.data.get("linuxdo_pay_packages")
+        source = raw if isinstance(raw, list) else DEFAULT_LINUXDO_PAY_PACKAGES
+        packages = [
+            item
+            for candidate in source
+            if (item := _normalize_linuxdo_pay_package(candidate)) is not None
+        ]
+        return packages or [
+            item
+            for candidate in DEFAULT_LINUXDO_PAY_PACKAGES
+            if (item := _normalize_linuxdo_pay_package(candidate)) is not None
+        ]
 
     @property
     def enable_api_docs(self) -> bool:
@@ -462,6 +601,7 @@ class ConfigStore:
         data = dict(self.data)
         data["refresh_account_interval_minute"] = self.refresh_account_interval_minute
         data["image_retention_days"] = self.image_retention_days
+        data["image_poll_timeout_secs"] = self.image_poll_timeout_secs
         data["auth_rate_limit_login_ip_limit"] = self.auth_rate_limit_login_ip_limit
         data["auth_rate_limit_login_ip_window_seconds"] = self.auth_rate_limit_login_ip_window_seconds
         data["auth_rate_limit_login_ip_email_limit"] = self.auth_rate_limit_login_ip_email_limit
@@ -474,6 +614,8 @@ class ConfigStore:
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["log_levels"] = self.log_levels
+        data["sensitive_words"] = self.sensitive_words
+        data["ai_review"] = self.ai_review
         data["enable_api_docs"] = self.enable_api_docs
         data["cors_allowed_origins"] = self.cors_allowed_origins
         data["image_generation_strategy"] = self.image_generation_strategy
@@ -494,8 +636,17 @@ class ConfigStore:
             )
             for item in self.image_generation_api_upstreams
         ]
+        data["linuxdo_pay_enabled"] = self.linuxdo_pay_enabled
+        data["linuxdo_pay_pid"] = self.linuxdo_pay_pid
+        data["linuxdo_pay_pid_set"] = bool(self.linuxdo_pay_pid)
+        data["linuxdo_pay_key_set"] = bool(self.linuxdo_pay_key)
+        data["linuxdo_pay_gateway"] = self.linuxdo_pay_gateway
+        data["linuxdo_pay_type"] = self.linuxdo_pay_type
+        data["linuxdo_pay_sitename"] = self.linuxdo_pay_sitename
+        data["linuxdo_pay_packages"] = self.linuxdo_pay_packages
         data.pop("auth-key", None)
         data.pop("image_generation_api_key", None)
+        data.pop("linuxdo_pay_key", None)
         return data
 
     def get_proxy_settings(self) -> str:
@@ -531,6 +682,11 @@ class ConfigStore:
                 next_data["image_generation_api_key"] = self.data.get("image_generation_api_key")
             else:
                 next_data.pop("image_generation_api_key", None)
+        if "linuxdo_pay_key" in next_data and not str(next_data.get("linuxdo_pay_key") or "").strip():
+            if self.data.get("linuxdo_pay_key"):
+                next_data["linuxdo_pay_key"] = self.data.get("linuxdo_pay_key")
+            else:
+                next_data.pop("linuxdo_pay_key", None)
         self.data = next_data
         self._save()
         return self.get()

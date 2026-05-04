@@ -155,6 +155,19 @@ type OpenAICompatibleUsageSummary = {
   errorHint: string;
 };
 
+const COMPATIBLE_4K_IMAGE_SIZES = new Set([
+  "2480x2480",
+  "3056x2032",
+  "2032x3056",
+  "2880x2160",
+  "2160x2880",
+  "2784x2224",
+  "2224x2784",
+  "3312x1872",
+  "1872x3312",
+  "3808x1632",
+]);
+
 function getImageSizeTier(size: string): ImageSizeTier {
   const mapped = {
     "1:1": "1024x1024",
@@ -166,6 +179,9 @@ function getImageSizeTier(size: string): ImageSizeTier {
   const match = mapped.match(/^(\d+)x(\d+)$/);
   if (!match) {
     return "normal";
+  }
+  if (COMPATIBLE_4K_IMAGE_SIZES.has(mapped)) {
+    return "4k";
   }
   const width = Number(match[1]);
   const height = Number(match[2]);
@@ -419,6 +435,14 @@ function taskDataToStoredImage(image: StoredImage, task: ImageTask): StoredImage
 
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+const IMAGE_TASK_POLL_INTERVAL_MS = 2000;
+const IMAGE_TASK_POLL_NETWORK_RETRY_LIMIT = 150;
+
+function isNetworkError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error || "");
+  return message === "Network Error" || /network|timeout|failed to fetch/i.test(message);
 }
 
 function pickFallbackConversationId(conversations: ImageConversation[]) {
@@ -1438,9 +1462,10 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
               activeTurn.size,
               activeTurn.quality,
               requestGenerationMode,
-            );
+        );
         await applyTasks(submitted.items);
 
+        let pollNetworkErrors = 0;
         while (true) {
           const latestConversation = conversationsRef.current.find((conversation) => conversation.id === conversationId);
           const latestTurn = latestConversation?.turns.find((turn) => turn.id === activeTurn.id);
@@ -1452,8 +1477,18 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
             break;
           }
 
-          await sleep(2000);
-          const taskList = await fetchImageTasks(loadingTaskIds);
+          await sleep(IMAGE_TASK_POLL_INTERVAL_MS);
+          let taskList: Awaited<ReturnType<typeof fetchImageTasks>>;
+          try {
+            taskList = await fetchImageTasks(loadingTaskIds);
+            pollNetworkErrors = 0;
+          } catch (error) {
+            if (isNetworkError(error) && pollNetworkErrors < IMAGE_TASK_POLL_NETWORK_RETRY_LIMIT) {
+              pollNetworkErrors += 1;
+              continue;
+            }
+            throw error;
+          }
           if (taskList.items.length > 0) {
             await applyTasks(taskList.items);
           }
@@ -1624,8 +1659,8 @@ function ImagePageContent({ session }: { session: StoredAuthSession }) {
 
   return (
     <>
-      <section className="mx-auto grid h-[calc(100dvh-6.25rem)] min-h-0 w-full max-w-[1380px] grid-cols-1 gap-2 px-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] sm:h-[calc(100dvh-5rem)] sm:gap-3 sm:px-3 sm:pb-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <div className="hidden h-full min-h-0 border-r border-stone-200/70 pr-3 lg:block">
+      <section className="mx-auto grid h-[calc(100dvh-6.5rem)] min-h-0 w-full max-w-[1420px] grid-cols-1 gap-2 rounded-[28px] border border-white/80 bg-white/55 px-0 pb-[calc(env(safe-area-inset-bottom)+0.5rem)] shadow-[0_24px_90px_-60px_rgba(15,23,42,0.55)] backdrop-blur-xl sm:h-[calc(100dvh-5.75rem)] sm:gap-3 sm:px-3 sm:pb-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:p-3">
+        <div className="hidden h-full min-h-0 rounded-[22px] border border-stone-200/70 bg-white/70 p-2 lg:block">
           <ImageSidebar
             conversations={conversations}
             isLoadingHistory={isLoadingHistory}

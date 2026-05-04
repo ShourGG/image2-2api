@@ -32,6 +32,7 @@ class UserKeyCreateRequest(BaseModel):
 class UserKeyUpdateRequest(BaseModel):
     name: str | None = None
     enabled: bool | None = None
+    key: str | None = None
 
 
 class AccountCreateRequest(BaseModel):
@@ -103,7 +104,10 @@ def create_router() -> APIRouter:
     @router.post("/api/auth/users")
     async def create_user_key(body: UserKeyCreateRequest, authorization: str | None = Header(default=None)):
         require_admin(authorization)
-        item, raw_key = auth_service.create_key(role="user", name=body.name)
+        try:
+            item, raw_key = auth_service.create_key(role="user", name=body.name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         return {"item": item, "key": raw_key, "items": auth_service.list_keys(role="user")}
 
     @router.post("/api/auth/users/{key_id}")
@@ -118,12 +122,16 @@ def create_router() -> APIRouter:
             for key, value in {
                 "name": body.name,
                 "enabled": body.enabled,
+                "key": body.key,
             }.items()
             if value is not None
         }
         if not updates:
             raise HTTPException(status_code=400, detail={"error": "no updates provided"})
-        item = auth_service.update_key(key_id, updates, role="user")
+        try:
+            item = auth_service.update_key(key_id, updates, role="user")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
         if item is None:
             raise HTTPException(status_code=404, detail={"error": "user key not found"})
         return {"item": item, "items": auth_service.list_keys(role="user")}

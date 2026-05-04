@@ -79,8 +79,17 @@ type AccountUpdateResponse = {
 export type SettingsConfig = {
   proxy: string;
   base_url?: string;
+  sensitive_words?: string[];
+  ai_review?: {
+    enabled?: boolean;
+    base_url?: string;
+    api_key?: string;
+    model?: string;
+    prompt?: string;
+  };
   refresh_account_interval_minute?: number | string;
   image_retention_days?: number | string;
+  image_poll_timeout_secs?: number | string;
   auth_rate_limit_login_ip_limit?: number | string;
   auth_rate_limit_login_ip_window_seconds?: number | string;
   auth_rate_limit_login_ip_email_limit?: number | string;
@@ -107,7 +116,10 @@ export type ManagedImage = {
   name: string;
   date: string;
   size: number;
+  width?: number;
+  height?: number;
   url: string;
+  thumbnail_url?: string;
   created_at: string;
 };
 
@@ -183,6 +195,15 @@ export type AdminAccount = {
   enabled: boolean;
   created_at: string | null;
   last_login_at: string | null;
+  last_used_at: string | null;
+};
+
+export type UserKey = {
+  id: string;
+  name: string;
+  role: "user";
+  enabled: boolean;
+  created_at: string | null;
   last_used_at: string | null;
 };
 
@@ -266,6 +287,40 @@ export type CheckinState = {
     gamble_outcome_factors: number[];
     summary: string[];
   };
+};
+
+export type LinuxDoPaymentPackage = {
+  id: string;
+  name: string;
+  amount: string;
+  coins: number;
+  description?: string;
+  enabled?: boolean;
+};
+
+export type PaymentOrder = {
+  id: string;
+  out_trade_no: string;
+  status: "pending" | "paid" | "failed" | string;
+  provider: "linuxdo" | string;
+  package_id: string;
+  package_name: string;
+  amount: string;
+  coins: number;
+  created_at: string;
+  updated_at?: string | null;
+  paid_at?: string | null;
+  provider_trade_no?: string | null;
+  payment_url?: string;
+};
+
+export type PaymentsResponse = {
+  linuxdo: {
+    enabled: boolean;
+    configured: boolean;
+    packages: LinuxDoPaymentPackage[];
+  };
+  items: PaymentOrder[];
 };
 
 export type MeResponse = {
@@ -384,6 +439,30 @@ export async function bindAdminAccount(payload: { email: string; password: strin
       password: payload.password,
       name: String(payload.name || "").trim(),
     },
+  });
+}
+
+export async function fetchUserKeys() {
+  return httpRequest<{ items: UserKey[] }>("/api/auth/users");
+}
+
+export async function createUserKey(name: string) {
+  return httpRequest<{ item: UserKey; key: string; items: UserKey[] }>("/api/auth/users", {
+    method: "POST",
+    body: { name },
+  });
+}
+
+export async function updateUserKey(keyId: string, updates: { enabled?: boolean; name?: string; key?: string }) {
+  return httpRequest<{ item: UserKey; items: UserKey[] }>(`/api/auth/users/${keyId}`, {
+    method: "POST",
+    body: updates,
+  });
+}
+
+export async function deleteUserKey(keyId: string) {
+  return httpRequest<{ items: UserKey[] }>(`/api/auth/users/${keyId}`, {
+    method: "DELETE",
   });
 }
 
@@ -641,6 +720,17 @@ export async function gambleCheckin(payload: { bet: number; max_multiplier: numb
   });
 }
 
+export async function fetchPayments() {
+  return httpRequest<PaymentsResponse>("/api/payments");
+}
+
+export async function createLinuxDoPaymentOrder(packageId: string) {
+  return httpRequest<{ item: PaymentOrder; payment_url?: string }>("/api/payments/linuxdo/orders", {
+    method: "POST",
+    body: { package_id: packageId },
+  });
+}
+
 export async function updateSettingsConfig(settings: SettingsConfig) {
   return httpRequest<{ config: SettingsConfig }>("/api/settings", {
     method: "POST",
@@ -654,6 +744,29 @@ export async function fetchImageApiUpstreamUsage(upstreamId: string) {
     runtime: ImageApiUpstreamRuntimeStatus;
   }>(
     `/api/settings/image-upstreams/${encodeURIComponent(upstreamId)}/usage`,
+  );
+}
+
+export async function testImageApiUpstreamGeneration(
+  upstreamId: string,
+  payload: { prompt: string; size?: string; quality?: string },
+) {
+  return httpRequest<{
+    result: {
+      ok: boolean;
+      status?: number;
+      prompt?: string;
+      data?: Array<{ b64_json?: string; url?: string; revised_prompt?: string }>;
+      error?: unknown;
+      code?: string | null;
+    };
+    runtime: ImageApiUpstreamRuntimeStatus;
+  }>(
+    `/api/settings/image-upstreams/${encodeURIComponent(upstreamId)}/test-image`,
+    {
+      method: "POST",
+      body: payload,
+    },
   );
 }
 

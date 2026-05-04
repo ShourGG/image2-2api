@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, Copy, ImageIcon, LoaderCircle, Maximize2, RefreshCw, Search } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Copy, ImageIcon, LoaderCircle, Maximize2, RefreshCw, Ruler, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { DateRangeFilter } from "@/components/date-range-filter";
@@ -9,10 +9,15 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { fetchManagedImages, type ManagedImage } from "@/lib/api";
+import { thumbnailUrlForImageUrl } from "@/lib/image-url";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 function formatSize(size: number) {
   return size > 1024 * 1024 ? `${(size / 1024 / 1024).toFixed(2)} MB` : `${Math.ceil(size / 1024)} KB`;
+}
+
+function formatDimensions(width?: number | null, height?: number | null) {
+  return width && height ? `${width} x ${height}` : "";
 }
 
 function ImageManagerContent() {
@@ -28,7 +33,7 @@ function ImageManagerContent() {
     id: item.name,
     src: item.url,
     sizeLabel: formatSize(item.size),
-    dimensions: dimensions[item.url],
+    dimensions: formatDimensions(item.width, item.height) || dimensions[item.url],
   }));
   const pageSize = 12;
   const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
@@ -93,6 +98,7 @@ function ImageManagerContent() {
           <div className="grid gap-0 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {currentRows.map((item, index) => {
               const imageIndex = items.findIndex((row) => row.url === item.url);
+              const imageDimensions = formatDimensions(item.width, item.height) || dimensions[item.url];
               return (
               <div key={item.url} className="group border-r border-b border-stone-100 p-4 transition hover:bg-stone-50">
                 <button
@@ -104,17 +110,26 @@ function ImageManagerContent() {
                   }}
                 >
                   <img
-                    src={item.url}
+                    src={item.thumbnail_url || thumbnailUrlForImageUrl(item.url)}
                     alt={item.name}
+                    loading="lazy"
+                    decoding="async"
                     className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                     onLoad={(event) => {
-                      const image = event.currentTarget;
-                      setDimensions((current) => ({
-                        ...current,
-                        [item.url]: `${image.naturalWidth} x ${image.naturalHeight}`,
-                      }));
+                      if (!item.width || !item.height) {
+                        setDimensions((current) => ({
+                          ...current,
+                          [item.url]: formatDimensions(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight),
+                        }));
+                      }
                     }}
                   />
+                  {imageDimensions ? (
+                    <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
+                      <Ruler className="size-3.5" />
+                      {imageDimensions}
+                    </span>
+                  ) : null}
                   <span className="absolute right-2 bottom-2 rounded-full bg-black/50 p-2 text-white opacity-0 transition group-hover:opacity-100">
                     <Maximize2 className="size-4" />
                   </span>
@@ -139,7 +154,10 @@ function ImageManagerContent() {
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <span>{formatSize(item.size)}</span>
-                    <span>{dimensions[item.url] || "-"}</span>
+                    <span className="inline-flex items-center gap-1">
+                      <Ruler className="size-3.5" />
+                      {imageDimensions || "-"}
+                    </span>
                   </div>
                 </div>
               </div>

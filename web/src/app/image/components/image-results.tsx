@@ -1,13 +1,21 @@
 "use client";
 
-import { useState } from "react";
-import { Clock3, Copy, Link2, LoaderCircle, Share2, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Copy, Link2, LoaderCircle, Ruler, Share2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { createImageShare } from "@/lib/api";
+import { thumbnailUrlForImageUrl } from "@/lib/image-url";
 import { cn } from "@/lib/utils";
 import type { ImageConversation, ImageTurn, ImageTurnStatus, StoredImage, StoredReferenceImage } from "@/store/image-conversations";
+
+const GENERATING_PHRASES = [
+  "正在为您设计中...",
+  "灵感正在慢慢成形",
+  "细节正在被认真打磨",
+  "画面很快就会出现",
+];
 
 export type ImageLightboxItem = {
   id: string;
@@ -28,6 +36,13 @@ function getStoredImageSrc(image: StoredImage) {
     return `data:image/png;base64,${image.b64_json}`;
   }
   return image.url || "";
+}
+
+function getStoredImagePreviewSrc(image: StoredImage) {
+  if (image.b64_json) {
+    return `data:image/png;base64,${image.b64_json}`;
+  }
+  return thumbnailUrlForImageUrl(image.url);
 }
 
 async function copyShareUrl(url: string) {
@@ -106,6 +121,7 @@ export function ImageResults({
     return (
       <div className="flex h-full min-h-[260px] items-center justify-center text-center sm:min-h-[420px]">
         <div className="w-full max-w-4xl">
+          <img src="/shour-logo.svg" alt="" className="mx-auto mb-5 size-16 rounded-3xl shadow-[0_18px_50px_-28px_rgba(15,23,42,0.55)]" />
           <h1
             className="text-2xl font-semibold tracking-tight text-stone-950 sm:text-3xl md:text-5xl"
             style={{
@@ -115,7 +131,7 @@ export function ImageResults({
             Turn ideas into images
           </h1>
           <p
-            className="mx-auto mt-3 max-w-[280px] text-sm italic tracking-[0.01em] text-stone-500 sm:mt-4 sm:max-w-none sm:text-[15px]"
+            className="mx-auto mt-3 max-w-[280px] text-sm italic tracking-[0.01em] text-stone-500 sm:mt-4 sm:max-w-[520px] sm:text-[15px]"
             style={{
               fontFamily: '"Palatino Linotype","Book Antiqua","URW Palladio L","Times New Roman",serif',
             }}
@@ -136,13 +152,14 @@ export function ImageResults({
         }));
         const successfulTurnImages = turn.images.flatMap((image) => {
           const src = image.status === "success" ? getStoredImageSrc(image) : "";
+          const dimensions = imageDimensions[image.id] || formatRequestedImageSize(turn.size);
           return src
             ? [
                 {
                   id: image.id,
                   src,
                   sizeLabel: image.b64_json ? formatBase64ImageSize(image.b64_json) : undefined,
-                  dimensions: imageDimensions[image.id],
+                  dimensions,
                 },
               ]
             : [];
@@ -227,10 +244,12 @@ export function ImageResults({
                 <div className="columns-1 gap-3 space-y-3 sm:columns-2 sm:gap-4 sm:space-y-4 xl:columns-3">
                   {turn.images.map((image, index) => {
                     const imageSrc = image.status === "success" ? getStoredImageSrc(image) : "";
+                    const placeholderAspectRatio = formatImageAspectRatio(turn.size);
                     if (image.status === "success" && imageSrc) {
+                      const previewSrc = getStoredImagePreviewSrc(image) || imageSrc;
                       const currentIndex = successfulTurnImages.findIndex((item) => item.id === image.id);
                       const sizeLabel = image.b64_json ? formatBase64ImageSize(image.b64_json) : "";
-                      const dimensions = imageDimensions[image.id];
+                      const dimensions = imageDimensions[image.id] || formatRequestedImageSize(turn.size);
                       const imageMeta = [sizeLabel, dimensions].filter(Boolean).join(" · ");
 
                       return (
@@ -241,20 +260,30 @@ export function ImageResults({
                           <button
                             type="button"
                             onClick={() => onOpenLightbox(successfulTurnImages, currentIndex)}
-                            className="group block w-full cursor-zoom-in"
+                            className="group relative block w-full cursor-zoom-in"
                           >
                             <img
-                              src={imageSrc}
+                              src={previewSrc}
                               alt={`Generated result ${index + 1}`}
+                              loading="lazy"
+                              decoding="async"
                               className="block h-auto w-full transition duration-200 group-hover:brightness-90"
                               onLoad={(event) => {
-                                updateImageDimensions(
-                                  image.id,
-                                  event.currentTarget.naturalWidth,
-                                  event.currentTarget.naturalHeight,
-                                );
+                                if (previewSrc === imageSrc) {
+                                  updateImageDimensions(
+                                    image.id,
+                                    event.currentTarget.naturalWidth,
+                                    event.currentTarget.naturalHeight,
+                                  );
+                                }
                               }}
                             />
+                            {dimensions ? (
+                              <span className="pointer-events-none absolute left-2 top-2 inline-flex items-center gap-1 rounded-full bg-black/55 px-2 py-1 text-[11px] font-medium text-white shadow-sm backdrop-blur">
+                                <Ruler className="size-3.5" />
+                                {dimensions}
+                              </span>
+                            ) : null}
                           </button>
                           <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-3">
                             <div className="min-w-0 text-xs text-stone-500">
@@ -327,15 +356,8 @@ export function ImageResults({
                       return (
                         <div
                           key={image.id}
-                          className={cn(
-                            "break-inside-avoid overflow-hidden rounded-2xl border border-rose-200 bg-rose-50 sm:rounded-none",
-                            turn.size === "1:1" && "sm:aspect-square",
-                            turn.size === "16:9" && "sm:aspect-video",
-                            turn.size === "9:16" && "sm:aspect-[9/16]",
-                            turn.size === "4:3" && "sm:aspect-[4/3]",
-                            turn.size === "3:4" && "sm:aspect-[3/4]",
-                            !["1:1", "16:9", "9:16", "4:3", "3:4"].includes(turn.size) && "sm:aspect-square",
-                          )}
+                          className="break-inside-avoid overflow-hidden rounded-2xl border border-rose-200 bg-rose-50 sm:rounded-none"
+                          style={{ aspectRatio: placeholderAspectRatio }}
                         >
                           <div className="flex h-full min-h-16 items-center justify-center px-4 py-4 text-center text-sm leading-6 text-rose-600 sm:px-6 sm:py-8">
                             {image.error || "生成失败"}
@@ -347,46 +369,10 @@ export function ImageResults({
                     return (
                       <div
                         key={image.id}
-                        className={cn(
-                          "break-inside-avoid overflow-hidden border border-stone-200/80 bg-stone-100/80",
-                          turn.size === "1:1" && "aspect-square",
-                          turn.size === "16:9" && "aspect-video",
-                          turn.size === "9:16" && "aspect-[9/16]",
-                          turn.size === "4:3" && "aspect-[4/3]",
-                          turn.size === "3:4" && "aspect-[3/4]",
-                          !["1:1", "16:9", "9:16", "4:3", "3:4"].includes(turn.size) && "aspect-square",
-                        )}
+                        className="relative break-inside-avoid overflow-hidden border border-stone-200/80 bg-stone-100/80"
+                        style={{ aspectRatio: placeholderAspectRatio }}
                       >
-                        <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-8 text-center text-stone-500">
-                          <div className="rounded-full bg-white p-3 shadow-sm">
-                            {turn.status === "queued" ? (
-                              <Clock3 className="size-5" />
-                            ) : (
-                              <LoaderCircle className="size-5 animate-spin" />
-                            )}
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-sm">
-                              {turn.status === "queued"
-                                ? turn.generationMode === "paid"
-                                  ? "上游忙碌或排队中..."
-                                  : "正在排队中..."
-                                : "正在处理图片..."}
-                            </p>
-                            {turn.status === "queued" && typeof turn.estimatedWaitSeconds === "number" ? (
-                              <p className="text-xs text-stone-400">
-                                {typeof turn.queueAhead === "number" ? `前方 ${turn.queueAhead} 个任务 · ` : ""}
-                                预计等待 {formatQueueEta(turn.estimatedWaitSeconds)}
-                              </p>
-                            ) : turn.status === "queued" ? (
-                              <p className="text-xs text-stone-400">
-                                {turn.generationMode === "paid"
-                                  ? "命中上游并发上限后会自动切换上游，并在全部忙碌时等待重试"
-                                  : "等待当前对话中的前序任务完成"}
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
+                        <GeneratingDots />
                       </div>
                     );
                   })}
@@ -402,6 +388,27 @@ export function ImageResults({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function GeneratingDots() {
+  const [phraseIndex, setPhraseIndex] = useState(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setPhraseIndex((idx) => (idx + 1) % GENERATING_PHRASES.length);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="generating-dots" aria-label="正在为您设计中">
+      <div className="generating-dots__phrases">
+        <span className="generating-dots__phrase generating-dots__phrase--active" key={phraseIndex}>
+          {GENERATING_PHRASES[phraseIndex]}
+        </span>
+      </div>
     </div>
   );
 }
@@ -450,4 +457,37 @@ function formatBase64ImageSize(base64: string) {
 
 function formatImageDimensions(width: number, height: number) {
   return `${width} x ${height}`;
+}
+
+function formatRequestedImageSize(size: string) {
+  const mapped = {
+    "1:1": "1024x1024",
+    "16:9": "1536x1024",
+    "4:3": "1536x1024",
+    "9:16": "1024x1536",
+    "3:4": "1024x1536",
+  }[size] || size;
+  const match = mapped.match(/^(\d+)x(\d+)$/);
+  if (!match) {
+    return "";
+  }
+  return formatImageDimensions(Number(match[1]), Number(match[2]));
+}
+
+function formatImageAspectRatio(size: string) {
+  const mapped = {
+    "1:1": "1 / 1",
+    "16:9": "16 / 9",
+    "4:3": "4 / 3",
+    "9:16": "9 / 16",
+    "3:4": "3 / 4",
+  }[size];
+  if (mapped) {
+    return mapped;
+  }
+  const match = size.match(/^(\d+)x(\d+)$/);
+  if (!match) {
+    return "1 / 1";
+  }
+  return `${Number(match[1])} / ${Number(match[2])}`;
 }

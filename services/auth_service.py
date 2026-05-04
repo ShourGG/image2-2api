@@ -126,6 +126,20 @@ def _normalize_image_mode(value: object) -> str:
     return mode if mode in {"free", "paid"} else "free"
 
 
+COMPATIBLE_4K_IMAGE_SIZES = {
+    "2480x2480",
+    "3056x2032",
+    "2032x3056",
+    "2880x2160",
+    "2160x2880",
+    "2784x2224",
+    "2224x2784",
+    "3312x1872",
+    "1872x3312",
+    "3808x1632",
+}
+
+
 def image_size_tier(value: object) -> str:
     size = str(value or "").strip().lower()
     mapped = {
@@ -145,6 +159,8 @@ def image_size_tier(value: object) -> str:
         height = int(height_text)
     except ValueError:
         return "normal"
+    if mapped in COMPATIBLE_4K_IMAGE_SIZES:
+        return "4k"
     max_edge = max(width, height)
     total_pixels = width * height
     if max_edge >= 3600 or total_pixels >= 7_000_000:
@@ -267,6 +283,10 @@ class AuthService:
     def _clean(value: object) -> str:
         return str(value or "").strip()
 
+    @staticmethod
+    def _default_key_name(role: object) -> str:
+        return "管理员凭据" if str(role or "").strip().lower() == "admin" else "普通用户"
+
     def _clean_email(self, value: object) -> str:
         return self._clean(value).lower()
 
@@ -280,7 +300,7 @@ class AuthService:
         if not key_hash:
             return None
         item_id = self._clean(raw.get("id")) or uuid.uuid4().hex[:12]
-        name = self._clean(raw.get("name")) or ("管理员凭据" if role == "admin" else "普通用户")
+        name = self._clean(raw.get("name")) or self._default_key_name(role)
         created_at = self._clean(raw.get("created_at")) or _now_iso()
         last_used_at = self._clean(raw.get("last_used_at")) or None
         return {
@@ -371,6 +391,63 @@ class AuthService:
 
     def _save(self) -> None:
         self.storage.save_auth_keys(self._items)
+
+    def _has_key_name_locked(self, name: str, *, role: AuthRole, exclude_id: str = "") -> bool:
+        candidate = self._clean(name)
+        if not candidate:
+            return False
+        for item in self._items:
+            if item.get("kind") != _KIND_API_KEY or item.get("role") != role:
+                continue
+            item_id = self._clean(item.get("id"))
+            if exclude_id and item_id == exclude_id:
+                continue
+            if self._clean(item.get("name")) == candidate:
+                return True
+        return False
+
+    def _build_default_key_name_locked(self, role: AuthRole, *, exclude_id: str = "") -> str:
+        base_name = self._default_key_name(role)
+        if not self._has_key_name_locked(base_name, role=role, exclude_id=exclude_id):
+            return base_name
+        suffix = 2
+        while True:
+            candidate = f"{base_name} {suffix}"
+            if not self._has_key_name_locked(candidate, role=role, exclude_id=exclude_id):
+                return candidate
+            suffix += 1
+
+    def _build_key_name_locked(self, name: str, *, role: AuthRole, exclude_id: str = "") -> str:
+        candidate = self._clean(name)
+        if not candidate:
+            return self._build_default_key_name_locked(role, exclude_id=exclude_id)
+        if self._has_key_name_locked(candidate, role=role, exclude_id=exclude_id):
+            raise ValueError("这个名称已经在使用中了，换一个更容易区分的名称吧")
+        return candidate
+
+    def _has_key_hash_locked(self, key_hash: str, *, exclude_id: str = "") -> bool:
+        for item in self._items:
+            if item.get("kind") != _KIND_API_KEY:
+                continue
+            item_id = self._clean(item.get("id"))
+            if exclude_id and item_id == exclude_id:
+                continue
+            stored_hash = self._clean(item.get("key_hash"))
+            if stored_hash and hmac.compare_digest(stored_hash, key_hash):
+                return True
+        return False
+
+    def _build_key_hash_locked(self, raw_key: str, *, exclude_id: str = "") -> str:
+        candidate = self._clean(raw_key)
+        if not candidate:
+            raise ValueError("请输入新的专用密钥")
+        admin_key = self._clean(config.auth_key)
+        if admin_key and hmac.compare_digest(candidate, admin_key):
+            raise ValueError("这个密钥和管理员密钥冲突了，请换一个新的密钥")
+        key_hash = _hash_key(candidate)
+        if self._has_key_hash_locked(key_hash, exclude_id=exclude_id):
+            raise ValueError("这个专用密钥已经存在，请换一个新的密钥")
+        return key_hash
 
     def _iter_items(self, *, kind: str | None = None, role: AuthRole | None = None):
         for index, item in enumerate(self._items):
@@ -523,19 +600,25 @@ class AuthService:
             return [self._public_key_item(item) for _, item in self._iter_items(kind=_KIND_API_KEY, role=role)]
 
     def create_key(self, *, role: AuthRole, name: str = "") -> tuple[dict[str, object], str]:
-        normalized_name = self._clean(name) or ("管理员凭据" if role == "admin" else "普通用户")
-        raw_key = f"sk-{secrets.token_urlsafe(24)}"
-        item = {
-            "id": uuid.uuid4().hex[:12],
-            "kind": _KIND_API_KEY,
-            "name": normalized_name,
-            "role": role,
-            "key_hash": _hash_key(raw_key),
-            "enabled": True,
-            "created_at": _now_iso(),
-            "last_used_at": None,
-        }
         with self._lock:
+            normalized_name = self._build_key_name_locked(name, role=role)
+            while True:
+                raw_key = f"sk-{secrets.token_urlsafe(24)}"
+                try:
+                    key_hash = self._build_key_hash_locked(raw_key)
+                    break
+                except ValueError:
+                    continue
+            item = {
+                "id": uuid.uuid4().hex[:12],
+                "kind": _KIND_API_KEY,
+                "name": normalized_name,
+                "role": role,
+                "key_hash": key_hash,
+                "enabled": True,
+                "created_at": _now_iso(),
+                "last_used_at": None,
+            }
             self._items.append(item)
             self._save()
             return self._public_key_item(item), raw_key
@@ -556,9 +639,19 @@ class AuthService:
                     continue
                 next_item = dict(item)
                 if "name" in updates and updates.get("name") is not None:
-                    next_item["name"] = self._clean(updates.get("name")) or next_item.get("name") or "普通用户"
+                    next_role: AuthRole = "admin" if next_item.get("role") == "admin" else "user"
+                    next_item["name"] = self._build_key_name_locked(
+                        str(updates.get("name") or ""),
+                        role=next_role,
+                        exclude_id=normalized_id,
+                    )
                 if "enabled" in updates and updates.get("enabled") is not None:
                     next_item["enabled"] = bool(updates.get("enabled"))
+                if "key" in updates and updates.get("key") is not None:
+                    next_item["key_hash"] = self._build_key_hash_locked(
+                        str(updates.get("key") or ""),
+                        exclude_id=normalized_id,
+                    )
                 self._items[index] = next_item
                 self._save()
                 return self._public_key_item(next_item)
@@ -954,6 +1047,24 @@ class AuthService:
                 self._save()
                 return self._public_user_item(next_item)
         return None
+
+    def add_paid_coins(self, user_id: str, amount: object) -> dict[str, object]:
+        normalized_id = self._clean(user_id)
+        if not normalized_id:
+            raise ValueError("user id is required")
+        normalized_amount = _coerce_non_negative_int(amount)
+        if normalized_amount <= 0:
+            raise ValueError("coin amount must be greater than 0")
+        with self._lock:
+            for index, item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user"):
+                if item.get("id") != normalized_id:
+                    continue
+                next_item = dict(item)
+                next_item["paid_coins"] = _coerce_non_negative_int(next_item.get("paid_coins"), DEFAULT_PAID_COINS) + normalized_amount
+                self._items[index] = next_item
+                self._save()
+                return self._public_user_item(next_item)
+        raise ValueError("user not found")
 
     def perform_normal_checkin(self, user_id: str) -> dict[str, object]:
         normalized_id = self._clean(user_id)

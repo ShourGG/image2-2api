@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { Button } from "@/components/ui/button";
 import { fetchImageShare, type SharedImageRecord } from "@/lib/api";
+import { thumbnailUrlForImageUrl } from "@/lib/image-url";
 
 async function copyText(text: string, successMessage: string) {
   await navigator.clipboard.writeText(text);
@@ -153,8 +154,10 @@ function SharePageContent() {
                 onClick={() => setLightboxOpen(true)}
               >
                 <img
-                  src={imageUrl}
+                  src={thumbnailUrlForImageUrl(imageUrl)}
                   alt="分享图片"
+                  loading="lazy"
+                  decoding="async"
                   className="block max-h-[78vh] w-full bg-stone-100 object-contain lg:max-h-full"
                 />
                 <span className="pointer-events-none absolute right-4 bottom-4 rounded-full bg-black/55 px-3 py-1.5 text-xs font-medium text-white opacity-90 transition group-hover:bg-black/70">

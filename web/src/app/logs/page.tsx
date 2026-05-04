@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { fetchSystemLogs, type SystemLog } from "@/lib/api";
+import { thumbnailUrlForImageUrl } from "@/lib/image-url";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 
 const LogType = {
@@ -251,7 +252,13 @@ function LogsContent({ isAdmin }: { isAdmin: boolean }) {
                     setLightboxOpen(true);
                   }}
                 >
-                  <img src={url} alt="" className="h-full w-full object-cover" />
+                  <img
+                    src={thumbnailUrlForImageUrl(url)}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="h-full w-full object-cover"
+                  />
                 </button>
               ))}
             </div>

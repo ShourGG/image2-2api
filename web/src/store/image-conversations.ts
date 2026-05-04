@@ -78,6 +78,31 @@ function getImageConversationsKey(scopeId: string) {
   return `${IMAGE_CONVERSATIONS_KEY_PREFIX}${normalizeScopeId(scopeId)}`;
 }
 
+function normalizeStoredImageUrl(value: unknown): string | undefined {
+  const url = typeof value === "string" ? value.trim() : "";
+  if (!url) {
+    return undefined;
+  }
+  if (typeof window === "undefined") {
+    return url;
+  }
+
+  try {
+    const currentUrl = new URL(window.location.href);
+    const imageUrl = new URL(url, currentUrl.origin);
+    if (
+      imageUrl.hostname === "image.shour.fun" &&
+      imageUrl.pathname.startsWith("/images/") &&
+      currentUrl.hostname !== imageUrl.hostname
+    ) {
+      return `${currentUrl.origin}${imageUrl.pathname}${imageUrl.search}${imageUrl.hash}`;
+    }
+  } catch {
+    return url;
+  }
+  return url;
+}
+
 function normalizeStoredImage(image: StoredImage): StoredImage {
   const normalized = {
     ...image,
@@ -89,7 +114,7 @@ function normalizeStoredImage(image: StoredImage): StoredImage {
     estimatedWaitSeconds: Number.isFinite(Number(image.estimatedWaitSeconds))
       ? Number(image.estimatedWaitSeconds)
       : undefined,
-    url: typeof image.url === "string" && image.url ? image.url : undefined,
+    url: normalizeStoredImageUrl(image.url),
     revised_prompt: typeof image.revised_prompt === "string" ? image.revised_prompt : undefined,
   };
   if (image.status === "loading" || image.status === "error" || image.status === "success") {

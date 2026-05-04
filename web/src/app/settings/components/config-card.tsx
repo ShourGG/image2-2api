@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { ChevronDown, LoaderCircle, PlugZap, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
+import { ChevronDown, ImageIcon, LoaderCircle, PlugZap, Plus, Save, ShieldCheck, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -9,16 +9,20 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   bindAdminAccount,
   fetchImageApiUpstreamStatuses,
   fetchImageApiUpstreamUsage,
+  testImageApiUpstreamGeneration,
   testProxy,
   type ImageApiUpstreamRuntimeStatus,
   type ProxyTestResult,
 } from "@/lib/api";
 
 import { useSettingsStore } from "../store";
+
+const DEFAULT_UPSTREAM_TEST_PROMPT = "一张简洁的测试图片：白色背景上有一个蓝色圆形和清晰的 TEST 字样。";
 
 function formatNumber(value: unknown) {
   const numeric = Number(value);
@@ -101,6 +105,12 @@ function runtimeBadgeLabel(status: ImageApiUpstreamRuntimeStatus | undefined) {
   return "可用";
 }
 
+type UpstreamImageTestResult = {
+  ok: boolean;
+  message: string;
+  imageUrl?: string;
+};
+
 type SettingsSectionProps = {
   title: string;
   description: string;
@@ -136,6 +146,9 @@ export function ConfigCard() {
   const [proxyTestResult, setProxyTestResult] = useState<ProxyTestResult | null>(null);
   const [testingUpstreamId, setTestingUpstreamId] = useState("");
   const [upstreamUsageResults, setUpstreamUsageResults] = useState<Record<string, string>>({});
+  const [testingImageUpstreamId, setTestingImageUpstreamId] = useState("");
+  const [upstreamTestPrompts, setUpstreamTestPrompts] = useState<Record<string, string>>({});
+  const [upstreamImageTestResults, setUpstreamImageTestResults] = useState<Record<string, UpstreamImageTestResult>>({});
   const [upstreamRuntimeStatuses, setUpstreamRuntimeStatuses] = useState<Record<string, ImageApiUpstreamRuntimeStatus>>({});
   const [adminBindName, setAdminBindName] = useState("");
   const [adminBindEmail, setAdminBindEmail] = useState("");
@@ -148,6 +161,7 @@ export function ConfigCard() {
     rateLimit: false,
     image: true,
     cleanup: false,
+    filter: false,
     logs: false,
   });
   const logLevelOptions = ["debug", "info", "warning", "error"];
@@ -156,10 +170,13 @@ export function ConfigCard() {
   const isSavingConfig = useSettingsStore((state) => state.isSavingConfig);
   const setRefreshAccountIntervalMinute = useSettingsStore((state) => state.setRefreshAccountIntervalMinute);
   const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
+  const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
   const setAuthRateLimitField = useSettingsStore((state) => state.setAuthRateLimitField);
   const setAutoRemoveInvalidAccounts = useSettingsStore((state) => state.setAutoRemoveInvalidAccounts);
   const setAutoRemoveRateLimitedAccounts = useSettingsStore((state) => state.setAutoRemoveRateLimitedAccounts);
   const setLogLevel = useSettingsStore((state) => state.setLogLevel);
+  const setSensitiveWordsText = useSettingsStore((state) => state.setSensitiveWordsText);
+  const setAIReviewField = useSettingsStore((state) => state.setAIReviewField);
   const setImageGenerationStrategy = useSettingsStore((state) => state.setImageGenerationStrategy);
   const addImageApiUpstream = useSettingsStore((state) => state.addImageApiUpstream);
   const updateImageApiUpstream = useSettingsStore((state) => state.updateImageApiUpstream);
@@ -280,6 +297,60 @@ export function ConfigCard() {
     }
   };
 
+  const handleTestUpstreamImage = async (upstreamId: string) => {
+    const prompt = String(upstreamTestPrompts[upstreamId] || DEFAULT_UPSTREAM_TEST_PROMPT).trim() || DEFAULT_UPSTREAM_TEST_PROMPT;
+    setTestingImageUpstreamId(upstreamId);
+    setUpstreamImageTestResults((current) => ({
+      ...current,
+      [upstreamId]: { ok: false, message: "测试出图中..." },
+    }));
+    try {
+      const data = await testImageApiUpstreamGeneration(upstreamId, { prompt, size: "1024x1024" });
+      setUpstreamRuntimeStatuses((current) => ({
+        ...current,
+        [upstreamId]: data.runtime,
+      }));
+      if (!data.result.ok) {
+        const error =
+          typeof data.result.error === "string"
+            ? data.result.error
+            : data.result.error
+              ? JSON.stringify(data.result.error)
+              : "测试出图失败";
+        setUpstreamImageTestResults((current) => ({
+          ...current,
+          [upstreamId]: { ok: false, message: error },
+        }));
+        toast.error(`测试出图失败：${error}`);
+        return;
+      }
+      const firstImage = data.result.data?.[0];
+      const imageUrl = firstImage?.url || (firstImage?.b64_json ? `data:image/png;base64,${firstImage.b64_json}` : "");
+      setUpstreamImageTestResults((current) => ({
+        ...current,
+        [upstreamId]: {
+          ok: Boolean(imageUrl),
+          message: imageUrl ? "测试出图成功" : "测试成功，但响应里没有图片地址",
+          imageUrl,
+        },
+      }));
+      if (imageUrl) {
+        toast.success("测试出图成功");
+      } else {
+        toast.warning("测试成功，但响应里没有图片地址");
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "测试出图失败";
+      setUpstreamImageTestResults((current) => ({
+        ...current,
+        [upstreamId]: { ok: false, message },
+      }));
+      toast.error(message);
+    } finally {
+      setTestingImageUpstreamId("");
+    }
+  };
+
   useEffect(() => {
     if (config?.image_generation_strategy !== "openai_compatible") {
       setUpstreamRuntimeStatuses({});
@@ -350,6 +421,7 @@ export function ConfigCard() {
       rateLimit: nextOpen,
       image: nextOpen,
       cleanup: nextOpen,
+      filter: nextOpen,
       logs: nextOpen,
     });
   };
@@ -533,6 +605,16 @@ export function ConfigCard() {
                     />
                     <p className="text-xs text-stone-500">自动删除多少天前的本地图片。</p>
                   </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">图片轮询超时</label>
+                    <Input
+                      value={String(config?.image_poll_timeout_secs || "")}
+                      onChange={(event) => setImagePollTimeoutSecs(event.target.value)}
+                      placeholder="120"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                    <p className="text-xs text-stone-500">单位秒，等待 ChatGPT 图片结果的最长时间。</p>
+                  </div>
                 </div>
               </SettingsSection>
             </>
@@ -688,6 +770,65 @@ export function ConfigCard() {
                             查额度
                           </Button>
                         </div>
+                        <div className="space-y-3 rounded-xl border border-stone-200 bg-white p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="text-sm text-stone-700">测试出图提示词</label>
+                            <span className="text-xs text-stone-500">只测试当前上游，不走自动切换。</span>
+                          </div>
+                          <Textarea
+                            value={upstreamTestPrompts[upstream.id] ?? DEFAULT_UPSTREAM_TEST_PROMPT}
+                            onChange={(event) =>
+                              setUpstreamTestPrompts((current) => ({
+                                ...current,
+                                [upstream.id]: event.target.value,
+                              }))
+                            }
+                            className="min-h-24 rounded-xl border-stone-200 bg-stone-50"
+                          />
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="text-xs leading-6 text-stone-500">
+                              {upstream.api_key_set && !upstream.api_key ? "可测试 /v1/images/generations 出图" : "保存 key 后可测试出图"}
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
+                              onClick={() => void handleTestUpstreamImage(upstream.id)}
+                              disabled={testingImageUpstreamId === upstream.id || !upstream.api_key_set || Boolean(upstream.api_key)}
+                            >
+                              {testingImageUpstreamId === upstream.id ? <LoaderCircle className="size-4 animate-spin" /> : <ImageIcon className="size-4" />}
+                              测试出图
+                            </Button>
+                          </div>
+                          {upstreamImageTestResults[upstream.id] ? (
+                            <div
+                              className={`rounded-xl border px-3 py-3 text-xs leading-6 ${
+                                upstreamImageTestResults[upstream.id].ok
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                  : "border-rose-200 bg-rose-50 text-rose-800"
+                              }`}
+                            >
+                              <div>{upstreamImageTestResults[upstream.id].message}</div>
+                              {upstreamImageTestResults[upstream.id].imageUrl ? (
+                                <div className="mt-2 space-y-2">
+                                  <a
+                                    className="font-medium underline"
+                                    href={upstreamImageTestResults[upstream.id].imageUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    打开测试图片
+                                  </a>
+                                  <img
+                                    src={upstreamImageTestResults[upstream.id].imageUrl}
+                                    alt="上游测试出图结果"
+                                    className="max-h-64 rounded-xl border border-emerald-200 bg-white object-contain"
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                     {(config?.image_generation_api_upstreams || []).length === 0 ? (
@@ -755,6 +896,73 @@ export function ConfigCard() {
                     />
                     自动移除限流账号
                   </label>
+                </div>
+              </SettingsSection>
+
+              <SettingsSection
+                title="请求过滤"
+                description="可选敏感词和 AI 审核；默认关闭，配置后会在请求进入上游前拦截。"
+                isOpen={openSections.filter}
+                onToggle={() => toggleSection("filter")}
+              >
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">敏感词</label>
+                    <Textarea
+                      value={(config?.sensitive_words || []).join("\n")}
+                      onChange={(event) => setSensitiveWordsText(event.target.value)}
+                      placeholder="一行一个，留空则不启用敏感词过滤"
+                      className="min-h-28 rounded-xl border-stone-200 bg-white font-mono text-xs shadow-none"
+                    />
+                    <p className="text-xs text-stone-500">命中任意一行都会直接拒绝本次任务。</p>
+                  </div>
+                  <div className="space-y-4 rounded-xl border border-stone-200 bg-white px-4 py-3">
+                    <label className="flex items-center gap-3 text-sm text-stone-700">
+                      <Checkbox
+                        checked={Boolean(config?.ai_review?.enabled)}
+                        onCheckedChange={(checked) => setAIReviewField("enabled", Boolean(checked))}
+                      />
+                      启用 AI 审核
+                    </label>
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <div className="space-y-2">
+                        <label className="text-sm text-stone-700">Base URL</label>
+                        <Input
+                          value={String(config?.ai_review?.base_url || "")}
+                          onChange={(event) => setAIReviewField("base_url", event.target.value)}
+                          placeholder="https://api.openai.com"
+                          className="h-10 rounded-xl border-stone-200 bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm text-stone-700">API Key</label>
+                        <Input
+                          value={String(config?.ai_review?.api_key || "")}
+                          onChange={(event) => setAIReviewField("api_key", event.target.value)}
+                          placeholder="sk-..."
+                          className="h-10 rounded-xl border-stone-200 bg-white"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-sm text-stone-700">Model</label>
+                        <Input
+                          value={String(config?.ai_review?.model || "")}
+                          onChange={(event) => setAIReviewField("model", event.target.value)}
+                          placeholder="gpt-4.1-mini"
+                          className="h-10 rounded-xl border-stone-200 bg-white"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm text-stone-700">审核提示词</label>
+                      <Textarea
+                        value={String(config?.ai_review?.prompt || "")}
+                        onChange={(event) => setAIReviewField("prompt", event.target.value)}
+                        placeholder="判断用户请求是否允许。只回答 ALLOW 或 REJECT。"
+                        className="min-h-24 rounded-xl border-stone-200 bg-white text-xs shadow-none"
+                      />
+                    </div>
+                  </div>
                 </div>
               </SettingsSection>
 

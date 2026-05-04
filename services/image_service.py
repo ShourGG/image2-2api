@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from PIL import Image
+
 from services.config import config
 from services.image_file_utils import file_is_supported_image
+from services.image_thumbnail_service import thumbnail_url_for_image_url
+
+
+def _image_dimensions(path) -> tuple[int | None, int | None]:
+    try:
+        with Image.open(path) as image:
+            return image.width, image.height
+    except Exception:
+        return None, None
 
 
 def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict[str, object]:
@@ -22,11 +33,16 @@ def list_images(base_url: str, start_date: str = "", end_date: str = "") -> dict
             continue
         if end_date and day > end_date:
             continue
+        url = f"{base_url.rstrip('/')}/images/{rel}"
+        width, height = _image_dimensions(path)
         items.append({
             "name": path.name,
             "date": day,
             "size": path.stat().st_size,
-            "url": f"{base_url.rstrip('/')}/images/{rel}",
+            "width": width,
+            "height": height,
+            "url": url,
+            "thumbnail_url": thumbnail_url_for_image_url(url),
             "created_at": datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
         })
     items.sort(key=lambda item: str(item["created_at"]), reverse=True)

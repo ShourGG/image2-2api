@@ -6,8 +6,10 @@ from pydantic import BaseModel, Field
 import json
 
 from api.support import ensure_upload_count, read_validated_image_upload, require_identity, resolve_image_base_url
+from services.content_filter import check_request
 from services.image_file_utils import MAX_IMAGE_BATCH_TASKS, MAX_IMAGE_PROMPT_LENGTH, MAX_IMAGE_TASK_ID_LENGTH
 from services.image_task_service import image_task_service
+from services.log_service import LoggedCall
 
 
 class ImageGenerationTaskRequest(BaseModel):
@@ -60,6 +62,14 @@ def _validate_client_task_ids(value: list[str]) -> list[str]:
     return task_ids
 
 
+async def filter_or_log(call: LoggedCall, text: str) -> None:
+    try:
+        await run_in_threadpool(check_request, text)
+    except HTTPException as exc:
+        call.log("调用失败", status="failed", error=str(exc.detail))
+        raise
+
+
 def create_router() -> APIRouter:
     router = APIRouter()
 
@@ -78,6 +88,7 @@ def create_router() -> APIRouter:
         authorization: str | None = Header(default=None),
     ):
         identity = require_identity(authorization)
+        await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations", body.model, "文生图任务"), body.prompt)
         try:
             return await run_in_threadpool(
                 image_task_service.submit_generation,
@@ -101,6 +112,7 @@ def create_router() -> APIRouter:
     ):
         identity = require_identity(authorization)
         task_ids = _validate_client_task_ids(_normalize_client_task_ids(body.client_task_ids))
+        await filter_or_log(LoggedCall(identity, "/api/image-tasks/generations/batch", body.model, "文生图批量任务"), body.prompt)
         try:
             return await run_in_threadpool(
                 image_task_service.submit_generation_batch,
@@ -130,6 +142,7 @@ def create_router() -> APIRouter:
         generation_mode: str | None = Form(default=None),
     ):
         identity = require_identity(authorization)
+        await filter_or_log(LoggedCall(identity, "/api/image-tasks/edits", model, "图生图任务"), prompt)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})
@@ -168,6 +181,7 @@ def create_router() -> APIRouter:
     ):
         identity = require_identity(authorization)
         normalized_task_ids = _validate_client_task_ids(_normalize_client_task_ids(client_task_ids))
+        await filter_or_log(LoggedCall(identity, "/api/image-tasks/edits/batch", model, "图生图批量任务"), prompt)
         uploads = [*(image or []), *(image_list or [])]
         if not uploads:
             raise HTTPException(status_code=400, detail={"error": "image file is required"})

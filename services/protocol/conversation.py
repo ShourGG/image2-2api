@@ -25,10 +25,24 @@ from services.auth_service import (
 )
 from services.config import config
 from services.image_file_utils import sniff_image_mime_and_extension
+from services.image_thumbnail_service import create_thumbnail_for_image_path
 from services.openai_backend_api import CODEX_IMAGE_MODEL, OpenAIBackendAPI
 from services.proxy_service import proxy_settings
 from utils.helper import IMAGE_MODELS
 from utils.log import logger
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+OPENAI_COMPATIBLE_IMAGE_TIMEOUT_SECONDS = max(
+    60.0,
+    _env_float("OPENAI_COMPATIBLE_IMAGE_TIMEOUT_SECONDS", 900.0),
+)
 
 
 class ImageGenerationError(Exception):
@@ -386,6 +400,7 @@ def save_image_bytes(image_data: bytes, base_url: str | None = None) -> str:
     file_path = config.images_dir / relative_dir / filename
     file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_bytes(image_data)
+    create_thumbnail_for_image_path(file_path)
     return f"{(base_url or config.base_url)}/images/{relative_dir.as_posix()}/{filename}"
 
 
@@ -621,7 +636,13 @@ def openai_compatible_image_outputs(
                     content_type=mime_type,
                     data=image_bytes,
                 )
-            response = session.post(url, headers=headers, data=data, multipart=multipart, timeout=300)
+            response = session.post(
+                url,
+                headers=headers,
+                data=data,
+                multipart=multipart,
+                timeout=OPENAI_COMPATIBLE_IMAGE_TIMEOUT_SECONDS,
+            )
         else:
             payload: dict[str, Any] = {
                 "model": model,
@@ -637,7 +658,7 @@ def openai_compatible_image_outputs(
                 url,
                 headers={**headers, "Content-Type": "application/json"},
                 json=payload,
-                timeout=300,
+                timeout=OPENAI_COMPATIBLE_IMAGE_TIMEOUT_SECONDS,
             )
 
         if response.status_code >= 400:

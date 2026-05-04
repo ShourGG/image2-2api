@@ -10,13 +10,17 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   fetchCurrentUser,
+  fetchPayments,
   gambleCheckin,
   normalCheckin,
+  createLinuxDoPaymentOrder,
   type CheckinHistoryEntry,
   type CurrentUser,
   type ImageQuality,
   type ImageSizeTier,
   type MeResponse,
+  type PaymentOrder,
+  type PaymentsResponse,
 } from "@/lib/api";
 import { useAuthGuard } from "@/lib/use-auth-guard";
 import type { StoredAuthSession } from "@/store/auth";
@@ -102,6 +106,26 @@ function checkinModeLabel(mode?: string | null) {
   return "未签到";
 }
 
+function paymentStatusLabel(status?: string | null) {
+  if (status === "paid") {
+    return "已到账";
+  }
+  if (status === "failed") {
+    return "失败";
+  }
+  return "待支付";
+}
+
+function paymentStatusClassName(status?: string | null) {
+  if (status === "paid") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+  if (status === "failed") {
+    return "bg-rose-50 text-rose-700";
+  }
+  return "bg-amber-50 text-amber-700";
+}
+
 function ProfileRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start justify-between gap-4 border-b border-stone-100 py-3 last:border-b-0">
@@ -164,11 +188,43 @@ function CheckinHistoryCard({ items }: { items: CheckinHistoryEntry[] }) {
   );
 }
 
+function PaymentHistory({ items }: { items: PaymentOrder[] }) {
+  if (items.length === 0) {
+    return <div className="rounded-xl bg-stone-50 px-4 py-5 text-sm text-stone-500">还没有充值记录。</div>;
+  }
+
+  return (
+    <div className="space-y-3">
+      {items.slice(0, 6).map((item) => (
+        <div key={item.id || item.out_trade_no} className="rounded-xl border border-stone-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="text-sm font-semibold text-stone-900">{item.package_name || "图币充值"}</div>
+              <div className="mt-1 text-xs text-stone-500">{formatDateTime(item.created_at)}</div>
+            </div>
+            <Badge className={`rounded-md ${paymentStatusClassName(item.status)}`}>
+              {paymentStatusLabel(item.status)}
+            </Badge>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-xs text-stone-500">
+            <span>{item.amount} Credit</span>
+            <span>到账 {formatPoints(item.coins)} 图币</span>
+            <span>订单 {item.out_trade_no}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AccountPageContent({ session }: { session: StoredAuthSession }) {
   const [payload, setPayload] = useState<MeResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isNormalSubmitting, setIsNormalSubmitting] = useState(false);
   const [isGambleSubmitting, setIsGambleSubmitting] = useState(false);
+  const [payments, setPayments] = useState<PaymentsResponse | null>(null);
+  const [isPaymentsLoading, setIsPaymentsLoading] = useState(false);
+  const [creatingPackageId, setCreatingPackageId] = useState("");
   const [bet, setBet] = useState("10");
   const [maxMultiplier, setMaxMultiplier] = useState("1");
 
@@ -178,11 +234,20 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
     const load = async () => {
       setIsLoading(true);
       try {
-        const data = await fetchCurrentUser();
+        const [data, paymentData] = await Promise.all([
+          fetchCurrentUser(),
+          session.role === "user"
+            ? fetchPayments().catch((error) => {
+                toast.error(error instanceof Error ? error.message : "加载充值信息失败");
+                return null;
+              })
+            : Promise.resolve(null),
+        ]);
         if (!active) {
           return;
         }
         setPayload(data);
+        setPayments(paymentData);
         if (data.checkins?.rules?.default_bet) {
           setBet(formatPoints(data.checkins.rules.default_bet));
         }
@@ -202,7 +267,7 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [session.role]);
 
   const currentUser: CurrentUser = payload?.item || {
     id: session.subjectId,
@@ -402,6 +467,38 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
       toast.error(error instanceof Error ? error.message : "赌狗签到失败");
     } finally {
       setIsGambleSubmitting(false);
+    }
+  };
+
+  const handleRefreshPayments = async () => {
+    setIsPaymentsLoading(true);
+    try {
+      const data = await fetchPayments();
+      setPayments(data);
+      const me = await fetchCurrentUser();
+      setPayload(me);
+      toast.success("充值状态已刷新");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "刷新充值状态失败");
+    } finally {
+      setIsPaymentsLoading(false);
+    }
+  };
+
+  const handleCreatePaymentOrder = async (packageId: string) => {
+    setCreatingPackageId(packageId);
+    try {
+      const data = await createLinuxDoPaymentOrder(packageId);
+      const paymentUrl = data.payment_url || data.item.payment_url;
+      if (!paymentUrl) {
+        toast.error("支付链接创建失败");
+        return;
+      }
+      window.location.href = paymentUrl;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "创建充值订单失败");
+    } finally {
+      setCreatingPackageId("");
     }
   };
 
@@ -630,6 +727,71 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
                     ))}
                     <li>赌狗签到校验规则：最大倍率不能高于当前账户积分，且下注积分 × 最大倍率不能超过当前积分减去 {formatPoints(reservedPoints)} 分。</li>
                   </ul>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {session.role === "user" ? (
+            <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
+              <CardContent className="space-y-5 p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-xl bg-stone-100">
+                      <CreditCard className="size-5 text-stone-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold tracking-tight">充值图币</h2>
+                      <p className="text-sm text-stone-500">Linux DO Credit 支付，到账后自动增加图币。</p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl border-stone-200 bg-white text-stone-700"
+                    onClick={() => void handleRefreshPayments()}
+                    disabled={isPaymentsLoading}
+                  >
+                    {isPaymentsLoading ? <LoaderCircle className="size-4 animate-spin" /> : null}
+                    刷新
+                  </Button>
+                </div>
+
+                {!payments?.linuxdo.enabled ? (
+                  <div className="rounded-xl bg-amber-50 px-4 py-4 text-sm text-amber-950">
+                    充值通道暂未开启。请稍后再试，或联系管理员检查 Linux DO Credit 配置。
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {payments.linuxdo.packages.map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className="rounded-2xl border border-stone-200 bg-white p-4 text-left transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        onClick={() => void handleCreatePaymentOrder(item.id)}
+                        disabled={Boolean(creatingPackageId)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-stone-900">{item.name}</div>
+                            <div className="mt-1 text-xs text-stone-500">{item.description || "充值后自动到账图币"}</div>
+                          </div>
+                          {creatingPackageId === item.id ? <LoaderCircle className="size-4 animate-spin text-stone-400" /> : null}
+                        </div>
+                        <div className="mt-4 flex items-end justify-between gap-3">
+                          <div className="text-2xl font-semibold tracking-tight text-stone-950">{formatPoints(item.coins)}</div>
+                          <div className="text-sm text-stone-500">{item.amount} Credit</div>
+                        </div>
+                        <div className="mt-1 text-xs text-stone-400">图币</div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <div>
+                  <div className="mb-3 text-sm font-semibold text-stone-900">充值记录</div>
+                  <PaymentHistory items={payments?.items || []} />
                 </div>
               </CardContent>
             </Card>
