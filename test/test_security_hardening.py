@@ -33,9 +33,14 @@ class _DummyAuthService:
             raise ValueError(self.login_error)
         return ({"id": "u1", "role": "user", "name": "test", "email": email, "points": 50}, "usr-token")
 
-    def register_user(self, *, email: str, password: str, name: str = "", registration_ip: str = "", registration_ip_limit: int = 0):
+    def get_user_by_invite_code(self, invite_code: str):
+        return None
+
+    def register_user(self, **kwargs):
         if self.register_error:
             raise ValueError(self.register_error)
+        email = str(kwargs.get("email") or "")
+        name = str(kwargs.get("name") or "")
         return ({"id": "u1", "role": "user", "name": name or "test", "email": email, "points": 50}, "usr-token")
 
 
@@ -114,6 +119,20 @@ class AuthSecurityHardeningTests(unittest.TestCase):
             auth_rate_limit_register_ip_email_limit=3,
             auth_rate_limit_register_ip_email_window_seconds=1800,
             auth_register_ip_account_limit=1,
+            user_registration_enabled=True,
+            user_registration_invite_code="",
+            user_registration_total_user_limit=0,
+            user_registration_password_min_length=6,
+            user_registration_name_required=False,
+            user_registration_allowed_email_domains=[],
+            user_registration_blocked_email_domains=[],
+            user_registration_default_points=50,
+            user_registration_default_paid_coins=0,
+            user_registration_default_paid_bonus_uses=1,
+            user_registration_default_preferred_image_mode="free",
+            user_registration_referral_enabled=False,
+            user_registration_referral_required=False,
+            user_registration_referral_reward_points=10,
         )
 
     def test_register_duplicate_error_is_generic(self) -> None:
