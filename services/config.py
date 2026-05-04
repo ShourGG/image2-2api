@@ -96,6 +96,14 @@ def _coerce_non_negative_int(value: object, default: int) -> int:
     return max(0, normalized)
 
 
+def _coerce_non_negative_float(value: object, default: float) -> float:
+    try:
+        normalized = float(value if value is not None else default)
+    except (TypeError, ValueError):
+        normalized = default
+    return max(0.0, normalized)
+
+
 def _normalize_money_text(value: object, default: str = "0.00") -> str:
     try:
         from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -258,6 +266,25 @@ class ConfigStore:
     @property
     def auth_register_ip_account_limit(self) -> int:
         return _coerce_non_negative_int(self.data.get("auth_register_ip_account_limit", 1), 1)
+
+    @property
+    def user_registration_enabled(self) -> bool:
+        value = os.getenv("CHATGPT2API_USER_REGISTRATION_ENABLED")
+        if value is None:
+            value = self.data.get("user_registration_enabled", True)
+        return _coerce_bool(value, True)
+
+    @property
+    def user_registration_default_points(self) -> float:
+        return _coerce_non_negative_float(self.data.get("user_registration_default_points", 50), 50)
+
+    @property
+    def user_registration_default_paid_coins(self) -> int:
+        return _coerce_non_negative_int(self.data.get("user_registration_default_paid_coins", 0), 0)
+
+    @property
+    def user_registration_default_paid_bonus_uses(self) -> int:
+        return _coerce_non_negative_int(self.data.get("user_registration_default_paid_bonus_uses", 1), 1)
 
     @property
     def auto_remove_invalid_accounts(self) -> bool:
@@ -611,6 +638,10 @@ class ConfigStore:
         data["auth_rate_limit_register_ip_email_limit"] = self.auth_rate_limit_register_ip_email_limit
         data["auth_rate_limit_register_ip_email_window_seconds"] = self.auth_rate_limit_register_ip_email_window_seconds
         data["auth_register_ip_account_limit"] = self.auth_register_ip_account_limit
+        data["user_registration_enabled"] = self.user_registration_enabled
+        data["user_registration_default_points"] = self.user_registration_default_points
+        data["user_registration_default_paid_coins"] = self.user_registration_default_paid_coins
+        data["user_registration_default_paid_bonus_uses"] = self.user_registration_default_paid_bonus_uses
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["log_levels"] = self.log_levels

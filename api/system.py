@@ -10,8 +10,6 @@ from curl_cffi.requests import Session
 from api.support import extract_bearer_token, require_admin, require_identity, resolve_image_base_url
 from services.auth_service import (
     COIN_EXCHANGE_RATE,
-    DEFAULT_USER_POINTS,
-    DEFAULT_PAID_BONUS_USES,
     GAMBLE_DEFAULT_BET,
     IMAGE_POINT_COST,
     IMAGE_POINT_COSTS,
@@ -154,6 +152,8 @@ def _enforce_auth_rate_limit(action: str, request: Request, email: str) -> None:
 
 def _register_error_message(exc: ValueError) -> str:
     message = str(exc)
+    if message == "registration disabled":
+        return "用户注册已关闭"
     if message == "email is invalid":
         return "邮箱格式不正确"
     if message == "password must be at least 6 characters":
@@ -201,8 +201,9 @@ def _billing_for_role(role: str) -> dict[str, object]:
         "image_point_cost_table": IMAGE_POINT_COST_TABLE,
         "paid_coin_cost_table": PAID_IMAGE_COIN_COST_TABLE,
         "coin_exchange_rate": COIN_EXCHANGE_RATE,
-        "default_paid_bonus_uses": DEFAULT_PAID_BONUS_USES,
-        "default_user_points": DEFAULT_USER_POINTS,
+        "default_paid_bonus_uses": config.user_registration_default_paid_bonus_uses,
+        "default_paid_coins": config.user_registration_default_paid_coins,
+        "default_user_points": config.user_registration_default_points,
     }
 
 
@@ -418,6 +419,8 @@ def create_router(app_version: str) -> APIRouter:
 
     @router.post("/auth/register")
     async def register(request: Request, body: RegisterRequest):
+        if not config.user_registration_enabled:
+            raise HTTPException(status_code=403, detail={"error": _register_error_message(ValueError("registration disabled"))})
         client_ip = _client_ip(request)
         _enforce_auth_rate_limit("register", request, body.email)
         try:
@@ -427,6 +430,9 @@ def create_router(app_version: str) -> APIRouter:
                 name=body.name,
                 registration_ip=client_ip,
                 registration_ip_limit=config.auth_register_ip_account_limit,
+                initial_points=config.user_registration_default_points,
+                initial_paid_coins=config.user_registration_default_paid_coins,
+                initial_paid_bonus_uses=config.user_registration_default_paid_bonus_uses,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": _register_error_message(exc)}) from exc

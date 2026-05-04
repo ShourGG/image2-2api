@@ -158,6 +158,7 @@ export function ConfigCard() {
   const [openSections, setOpenSections] = useState({
     admin: true,
     basic: true,
+    userRegistration: true,
     rateLimit: false,
     image: true,
     cleanup: false,
@@ -171,6 +172,8 @@ export function ConfigCard() {
   const setRefreshAccountIntervalMinute = useSettingsStore((state) => state.setRefreshAccountIntervalMinute);
   const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
   const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
+  const setUserRegistrationEnabled = useSettingsStore((state) => state.setUserRegistrationEnabled);
+  const setUserRegistrationField = useSettingsStore((state) => state.setUserRegistrationField);
   const setAuthRateLimitField = useSettingsStore((state) => state.setAuthRateLimitField);
   const setAutoRemoveInvalidAccounts = useSettingsStore((state) => state.setAutoRemoveInvalidAccounts);
   const setAutoRemoveRateLimitedAccounts = useSettingsStore((state) => state.setAutoRemoveRateLimitedAccounts);
@@ -844,6 +847,55 @@ export function ConfigCard() {
 
           {activeTab === "security" ? (
             <>
+              <SettingsSection
+                title="用户注册设置"
+                description="这里控制 `/signup` 普通用户自助注册，不影响 `/register` 注册机。"
+                isOpen={openSections.userRegistration}
+                onToggle={() => toggleSection("userRegistration")}
+              >
+                <div className="space-y-4">
+                  <label className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+                    <Checkbox
+                      checked={config?.user_registration_enabled !== false}
+                      onCheckedChange={(checked) => setUserRegistrationEnabled(Boolean(checked))}
+                    />
+                    <span>
+                      <span className="block font-medium text-stone-800">允许普通用户注册</span>
+                      <span className="mt-1 block text-xs text-stone-500">关闭后 `/auth/register` 会返回“用户注册已关闭”。管理员登录和已有用户登录不受影响。</span>
+                    </span>
+                  </label>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="space-y-2">
+                      <label className="text-sm text-stone-700">新用户初始积分</label>
+                      <Input
+                        value={String(config?.user_registration_default_points ?? "")}
+                        onChange={(event) => setUserRegistrationField("user_registration_default_points", event.target.value)}
+                        placeholder="50"
+                        className="h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm text-stone-700">新用户初始图币</label>
+                      <Input
+                        value={String(config?.user_registration_default_paid_coins ?? "")}
+                        onChange={(event) => setUserRegistrationField("user_registration_default_paid_coins", event.target.value)}
+                        placeholder="0"
+                        className="h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm text-stone-700">新用户高清体验次数</label>
+                      <Input
+                        value={String(config?.user_registration_default_paid_bonus_uses ?? "")}
+                        onChange={(event) => setUserRegistrationField("user_registration_default_paid_bonus_uses", event.target.value)}
+                        placeholder="1"
+                        className="h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </SettingsSection>
+
               <SettingsSection
                 title="登录 / 注册限流"
                 description="命中后返回 429，并附带重试秒数。默认收起，只有需要调限流时再展开。"

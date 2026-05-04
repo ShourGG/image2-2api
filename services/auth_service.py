@@ -769,6 +769,9 @@ class AuthService:
         name: str = "",
         registration_ip: str = "",
         registration_ip_limit: int = 0,
+        initial_points: object = DEFAULT_USER_POINTS,
+        initial_paid_coins: object = DEFAULT_PAID_COINS,
+        initial_paid_bonus_uses: object = DEFAULT_PAID_BONUS_USES,
     ) -> tuple[dict[str, object], str]:
         normalized_email = self._clean_email(email)
         if "@" not in normalized_email:
@@ -809,9 +812,9 @@ class AuthService:
                 "last_used_at": None,
                 "session_hash": None,
                 "session_created_at": None,
-                "points": DEFAULT_USER_POINTS,
-                "paid_coins": DEFAULT_PAID_COINS,
-                "paid_bonus_uses": DEFAULT_PAID_BONUS_USES,
+                "points": _coerce_points(initial_points, DEFAULT_USER_POINTS),
+                "paid_coins": _coerce_non_negative_int(initial_paid_coins, DEFAULT_PAID_COINS),
+                "paid_bonus_uses": _coerce_non_negative_int(initial_paid_bonus_uses, DEFAULT_PAID_BONUS_USES),
                 "preferred_image_mode": "free",
                 "checkin_total_count": 0,
                 "checkin_normal_count": 0,

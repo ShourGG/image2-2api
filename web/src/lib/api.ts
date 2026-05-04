@@ -99,6 +99,10 @@ export type SettingsConfig = {
   auth_rate_limit_register_ip_email_limit?: number | string;
   auth_rate_limit_register_ip_email_window_seconds?: number | string;
   auth_register_ip_account_limit?: number | string;
+  user_registration_enabled?: boolean;
+  user_registration_default_points?: number | string;
+  user_registration_default_paid_coins?: number | string;
+  user_registration_default_paid_bonus_uses?: number | string;
   image_generation_strategy?: "chatgpt2api" | "gpt2api" | "codex_responses" | "openai_compatible";
   image_generation_api_base_url?: string;
   image_generation_api_key?: string;
@@ -334,6 +338,7 @@ export type MeResponse = {
     paid_coin_cost_table?: Partial<Record<ImageSizeTier, Partial<Record<ImageQuality, number>>>>;
     coin_exchange_rate?: number;
     default_paid_bonus_uses?: number;
+    default_paid_coins?: number;
     default_user_points: number;
   };
   checkins?: CheckinState;

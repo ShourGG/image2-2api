@@ -56,6 +56,14 @@ function normalizeInteger(value: unknown, fallback: number, min = 0) {
   return Math.max(min, Math.trunc(numeric));
 }
 
+function normalizeNumber(value: unknown, fallback: number, min = 0) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.max(min, numeric);
+}
+
 function normalizeConfig(config: SettingsConfig): SettingsConfig {
   const imageGenerationStrategy =
     config.image_generation_strategy === "gpt2api" ||
@@ -97,6 +105,10 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     auth_rate_limit_register_ip_email_limit: normalizeInteger(config.auth_rate_limit_register_ip_email_limit, 3, 0),
     auth_rate_limit_register_ip_email_window_seconds: normalizeInteger(config.auth_rate_limit_register_ip_email_window_seconds, 1800, 1),
     auth_register_ip_account_limit: normalizeInteger(config.auth_register_ip_account_limit, 1, 0),
+    user_registration_enabled: config.user_registration_enabled !== false,
+    user_registration_default_points: normalizeNumber(config.user_registration_default_points, 50, 0),
+    user_registration_default_paid_coins: normalizeInteger(config.user_registration_default_paid_coins, 0, 0),
+    user_registration_default_paid_bonus_uses: normalizeInteger(config.user_registration_default_paid_bonus_uses, 1, 0),
     image_generation_strategy: imageGenerationStrategy,
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
     auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
@@ -174,6 +186,14 @@ type SettingsStore = {
   setRefreshAccountIntervalMinute: (value: string) => void;
   setImageRetentionDays: (value: string) => void;
   setImagePollTimeoutSecs: (value: string) => void;
+  setUserRegistrationEnabled: (value: boolean) => void;
+  setUserRegistrationField: (
+    key:
+      | "user_registration_default_points"
+      | "user_registration_default_paid_coins"
+      | "user_registration_default_paid_bonus_uses",
+    value: string,
+  ) => void;
   setAuthRateLimitField: (
     key:
       | "auth_rate_limit_login_ip_limit"
@@ -312,6 +332,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         auth_rate_limit_register_ip_email_limit: normalizeInteger(config.auth_rate_limit_register_ip_email_limit, 3, 0),
         auth_rate_limit_register_ip_email_window_seconds: normalizeInteger(config.auth_rate_limit_register_ip_email_window_seconds, 1800, 1),
         auth_register_ip_account_limit: normalizeInteger(config.auth_register_ip_account_limit, 1, 0),
+        user_registration_enabled: config.user_registration_enabled !== false,
+        user_registration_default_points: normalizeNumber(config.user_registration_default_points, 50, 0),
+        user_registration_default_paid_coins: normalizeInteger(config.user_registration_default_paid_coins, 0, 0),
+        user_registration_default_paid_bonus_uses: normalizeInteger(config.user_registration_default_paid_bonus_uses, 1, 0),
         image_generation_strategy:
           config.image_generation_strategy === "gpt2api" ||
           config.image_generation_strategy === "codex_responses" ||
@@ -377,6 +401,14 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setImagePollTimeoutSecs: (value) => {
     set((state) => state.config ? { config: { ...state.config, image_poll_timeout_secs: value } } : {});
+  },
+
+  setUserRegistrationEnabled: (value) => {
+    set((state) => state.config ? { config: { ...state.config, user_registration_enabled: value } } : {});
+  },
+
+  setUserRegistrationField: (key, value) => {
+    set((state) => state.config ? { config: { ...state.config, [key]: value } } : {});
   },
 
   setAuthRateLimitField: (key, value) => {
