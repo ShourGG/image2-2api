@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from threading import Event, Thread
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request, UploadFile
 
@@ -17,6 +18,7 @@ from services.public_error import sanitize_public_error_message
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 WEB_DIST_DIR = BASE_DIR / "web_dist"
+LOCAL_PUBLIC_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
 
 
 def extract_bearer_token(authorization: str | None) -> str:
@@ -52,8 +54,46 @@ def require_admin(authorization: str | None) -> dict[str, object]:
     return identity
 
 
+def _host_name(value: str) -> str:
+    host = str(value or "").strip().lower()
+    if not host:
+        return ""
+    if host.startswith("[") and "]" in host:
+        return host[1:host.index("]")]
+    if host.count(":") > 1:
+        return host
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
+def _is_local_public_host(value: str) -> bool:
+    host = _host_name(value)
+    return host in LOCAL_PUBLIC_HOSTS or host.startswith("127.")
+
+
+def _validated_configured_base_url() -> str:
+    base_url = str(config.base_url or "").strip().rstrip("/")
+    if not base_url:
+        return ""
+    parsed = urlsplit(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=500, detail={"error": "base_url 配置不正确"})
+    return base_url
+
+
+def resolve_public_base_url(request: Request) -> str:
+    configured = _validated_configured_base_url()
+    if configured:
+        return configured
+
+    host = str(request.headers.get("host") or request.url.netloc or "").strip()
+    if host and _is_local_public_host(host):
+        return f"{request.url.scheme}://{host}".rstrip("/")
+
+    raise HTTPException(status_code=500, detail={"error": "base_url 未配置，不能从请求 Host 生成公开地址"})
+
+
 def resolve_image_base_url(request: Request) -> str:
-    return config.base_url or f"{request.url.scheme}://{request.headers.get('host', request.url.netloc)}"
+    return resolve_public_base_url(request)
 
 
 def raise_image_quota_error(exc: Exception) -> None:

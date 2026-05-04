@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 
 os.environ["CHATGPT2API_AUTH_KEY"] = "chatgpt2api"
@@ -47,6 +48,12 @@ class ShareApiTests(unittest.TestCase):
         self.service_patcher = mock.patch.object(shares_module, "share_service", self.fake_service)
         self.service_patcher.start()
         self.addCleanup(self.service_patcher.stop)
+        self.config_patcher = mock.patch(
+            "api.support.config",
+            SimpleNamespace(auth_key="chatgpt2api", base_url="https://image.shour.fun"),
+        )
+        self.config_patcher.start()
+        self.addCleanup(self.config_patcher.stop)
         app = FastAPI()
         app.include_router(shares_module.create_router())
         self.client = TestClient(app)
@@ -72,7 +79,22 @@ class ShareApiTests(unittest.TestCase):
         self.assertEqual(payload["item"]["id"], "shr123")
         self.assertTrue(str(payload["share_url"]).endswith("/share/?id=shr123"))
         self.assertEqual(len(self.fake_service.create_calls), 1)
-        self.assertTrue(str(self.fake_service.create_calls[0][1]["base_url"]).startswith("http"))
+        self.assertEqual(self.fake_service.create_calls[0][1]["base_url"], "https://image.shour.fun")
+
+    def test_create_share_ignores_spoofed_host_when_base_url_configured(self):
+        response = self.client.post(
+            "/api/shares",
+            headers={**AUTH_HEADERS, "Host": "evil.example"},
+            json={
+                "image_url": "https://image.shour.fun/images/fake.png",
+                "prompt": "cat",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["share_url"], "https://image.shour.fun/share/?id=shr123")
+        self.assertEqual(self.fake_service.create_calls[-1][1]["base_url"], "https://image.shour.fun")
 
     def test_get_share_is_public(self):
         response = self.client.get("/api/shares/shr123")

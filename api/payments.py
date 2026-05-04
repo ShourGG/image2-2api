@@ -7,8 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from api.support import require_identity
-from services.config import config
+from api.support import require_identity, resolve_public_base_url
 from services.payment_service import payment_service
 
 
@@ -24,19 +23,6 @@ def _client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return str(request.client.host).strip()
     return "unknown"
-
-
-def _public_base_url(request: Request) -> str:
-    configured = config.base_url
-    if configured:
-        return configured.rstrip("/")
-    forwarded_host = str(request.headers.get("x-forwarded-host") or "").strip()
-    host = forwarded_host or str(request.headers.get("host") or "").strip()
-    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",", 1)[0].strip()
-    proto = forwarded_proto or request.url.scheme
-    if host:
-        return f"{proto}://{host}".rstrip("/")
-    return str(request.base_url).rstrip("/")
 
 
 async def _request_params(request: Request) -> dict[str, object]:
@@ -80,7 +66,7 @@ def create_router() -> APIRouter:
         authorization: str | None = Header(default=None),
     ):
         identity = require_identity(authorization)
-        base_url = _public_base_url(request)
+        base_url = resolve_public_base_url(request)
         try:
             item = payment_service.create_linuxdo_order(
                 user=identity,
