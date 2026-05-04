@@ -194,6 +194,32 @@ class AuthServiceTests(unittest.TestCase):
             )
             self.assertEqual(second["registration_ip"], "203.0.113.11")
 
+    def test_register_user_applies_referral_reward_to_referrer(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            service = AuthService(JSONStorageBackend(Path(tmp_dir) / "accounts.json", Path(tmp_dir) / "auth_keys.json"))
+
+            referrer, _ = service.register_user(
+                email="referrer@example.com",
+                password="secret1",
+                initial_points=20,
+            )
+            invited, _ = service.register_user(
+                email="invited@example.com",
+                password="secret1",
+                referrer_user_id=str(referrer["id"]),
+                referral_reward_points=12.5,
+            )
+
+            updated_referrer = service.get_user(str(referrer["id"]))
+
+            self.assertEqual(invited["invited_by_user_id"], referrer["id"])
+            self.assertEqual(invited["invited_by_invite_code"], referrer["invite_code"])
+            self.assertIsNotNone(updated_referrer)
+            self.assertEqual(updated_referrer["points"], 32.5)
+            self.assertEqual(updated_referrer["referral_count"], 1)
+            self.assertEqual(updated_referrer["referral_points_earned"], 12.5)
+            self.assertIsNotNone(updated_referrer["last_referral_at"])
+
 
 if __name__ == "__main__":
     unittest.main()

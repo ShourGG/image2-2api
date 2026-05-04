@@ -130,7 +130,7 @@ def _validate_registration_policy(body: RegisterRequest) -> str:
             referral_input_code = legacy_invite_code
 
     if site_invite_code and site_input_code != site_invite_code:
-        raise ValueError("invite code invalid")
+        raise ValueError("site invite code invalid")
 
     referrer_user_id = ""
     if config.user_registration_referral_enabled:
@@ -138,9 +138,9 @@ def _validate_registration_policy(body: RegisterRequest) -> str:
             referrer = auth_service.get_user_by_invite_code(referral_input_code)
             referrer_user_id = str(referrer.get("id") or "").strip() if referrer else ""
             if not referrer_user_id:
-                raise ValueError("invite code invalid")
+                raise ValueError("referral code invalid")
         if config.user_registration_referral_required and not referrer_user_id:
-            raise ValueError("invite code invalid")
+            raise ValueError("referral code invalid")
 
     domain = _email_domain(body.email)
     allowed_domains = config.user_registration_allowed_email_domains
@@ -218,6 +218,10 @@ def _register_error_message(exc: ValueError) -> str:
         return "请输入昵称"
     if message == "invite code invalid":
         return "邀请码不正确"
+    if message == "site invite code invalid":
+        return "站点邀请码不正确"
+    if message == "referral code invalid":
+        return "推荐人邀请码不正确"
     if message == "email domain not allowed":
         return "当前邮箱域名不允许注册"
     if message == "email domain blocked":

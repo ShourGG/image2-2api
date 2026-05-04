@@ -199,8 +199,55 @@ class AuthSecurityHardeningTests(unittest.TestCase):
                 )
 
                 self.assertEqual(response.status_code, 400, response.text)
-                self.assertEqual(response.json()["detail"]["error"], "邀请码不正确")
+                self.assertEqual(response.json()["detail"]["error"], "站点邀请码不正确")
             self.assertIsNone(auth.last_register_kwargs)
+
+    def test_referral_code_error_is_specific(self) -> None:
+        auth = _DummyAuthService()
+        with mock.patch.object(
+            system_module,
+            "auth_service",
+            auth,
+        ), mock.patch.object(
+            system_module,
+            "rate_limit_service",
+            _DummyRateLimiter(RateLimitResult(allowed=True)),
+        ), mock.patch.object(
+            system_module,
+            "config",
+            self._config(
+                user_registration_invite_code="SITE",
+                user_registration_referral_enabled=True,
+                user_registration_referral_required=True,
+            ),
+        ):
+            client = TestClient(self.app)
+            response = client.post(
+                "/auth/register",
+                json={
+                    "email": "user@example.com",
+                    "password": "secret123",
+                    "name": "user",
+                    "site_invite_code": "SITE",
+                    "referral_code": "BAD",
+                },
+            )
+
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertEqual(response.json()["detail"]["error"], "推荐人邀请码不正确")
+            self.assertIsNone(auth.last_register_kwargs)
+
+            missing_referral = client.post(
+                "/auth/register",
+                json={
+                    "email": "user2@example.com",
+                    "password": "secret123",
+                    "name": "user2",
+                    "site_invite_code": "SITE",
+                },
+            )
+            self.assertEqual(missing_referral.status_code, 400, missing_referral.text)
+            self.assertEqual(missing_referral.json()["detail"]["error"], "推荐人邀请码不正确")
 
     def test_site_and_referral_codes_are_validated_separately(self) -> None:
         auth = _DummyAuthService(referrers={"FRIEND": {"id": "ref1", "invite_code": "FRIEND"}})

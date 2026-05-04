@@ -104,6 +104,28 @@
 
 下面示例使用本地开发端口 `8025`；如果按 Docker 教程部署，请改成 `3000` 或你的域名。
 
+### 用户注册
+
+`/auth/register` 同时支持站点准入码和用户推荐码，两个字段不要混用：
+
+| 字段 | 说明 |
+| --- | --- |
+| `site_invite_code` | 站点邀请码。后台「用户注册设置」里配置的全站统一注册口令，只负责是否允许注册。 |
+| `referral_code` | 推荐人邀请码。已有用户在 `/account` 复制的邀请码，只负责给邀请人返积分。 |
+| `invite_code` | 旧客户端兼容字段，不建议新接入使用。新前端应明确传上面两个字段。 |
+
+```bash
+curl http://127.0.0.1:8025/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "user@example.com",
+    "password": "secret123",
+    "name": "user",
+    "site_invite_code": "SITE-CODE",
+    "referral_code": "USER-CODE"
+  }'
+```
+
 ### 模型列表
 
 ```bash

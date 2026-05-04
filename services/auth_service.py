@@ -872,7 +872,7 @@ class AuthService:
                         referrer_item = candidate
                         break
                 if referrer_item is None:
-                    raise ValueError("invite code invalid")
+                    raise ValueError("referral code invalid")
             if normalized_total_user_limit > 0:
                 user_count = sum(1 for _index, _item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user"))
                 if user_count >= normalized_total_user_limit:
