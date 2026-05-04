@@ -426,6 +426,7 @@ export function ConfigCard() {
     setOpenSections({
       admin: nextOpen,
       basic: nextOpen,
+      userRegistration: nextOpen,
       rateLimit: nextOpen,
       image: nextOpen,
       cleanup: nextOpen,

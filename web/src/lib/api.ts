@@ -431,13 +431,22 @@ export async function loginWithPassword(email: string, password: string) {
   });
 }
 
-export async function registerUserAccount(payload: { email: string; password: string; name?: string; invite_code?: string }) {
+export async function registerUserAccount(payload: {
+  email: string;
+  password: string;
+  name?: string;
+  site_invite_code?: string;
+  referral_code?: string;
+  invite_code?: string;
+}) {
   return httpRequest<LoginResponse>("/auth/register", {
     method: "POST",
     body: {
       email: String(payload.email || "").trim(),
       password: payload.password,
       name: String(payload.name || "").trim(),
+      site_invite_code: String(payload.site_invite_code || "").trim(),
+      referral_code: String(payload.referral_code || "").trim(),
       invite_code: String(payload.invite_code || "").trim(),
     },
     redirectOnUnauthorized: false,

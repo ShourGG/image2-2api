@@ -57,6 +57,10 @@ class RegisterRequest(BaseModel):
     email: str = ""
     password: str = ""
     name: str = ""
+    site_invite_code: str = ""
+    referral_code: str = ""
+    # Backward compatibility for older clients. New clients should send the two
+    # explicit fields above so site admission and referral rewards stay separate.
     invite_code: str = ""
 
 
@@ -114,17 +118,28 @@ def _domain_matches(domain: str, rule: str) -> bool:
 
 
 def _validate_registration_policy(body: RegisterRequest) -> str:
-    input_invite_code = str(body.invite_code or "").strip()
     site_invite_code = config.user_registration_invite_code
-    referrer = auth_service.get_user_by_invite_code(input_invite_code) if config.user_registration_referral_enabled else None
-    referrer_user_id = str(referrer.get("id") or "").strip() if referrer else ""
+    site_input_code = str(body.site_invite_code or "").strip()
+    referral_input_code = str(body.referral_code or "").strip()
+    legacy_invite_code = str(body.invite_code or "").strip()
 
-    if site_invite_code and input_invite_code != site_invite_code and not referrer_user_id:
+    if legacy_invite_code:
+        if not site_input_code and site_invite_code and legacy_invite_code == site_invite_code:
+            site_input_code = legacy_invite_code
+        elif not referral_input_code:
+            referral_input_code = legacy_invite_code
+
+    if site_invite_code and site_input_code != site_invite_code:
         raise ValueError("invite code invalid")
+
+    referrer_user_id = ""
     if config.user_registration_referral_enabled:
+        if referral_input_code:
+            referrer = auth_service.get_user_by_invite_code(referral_input_code)
+            referrer_user_id = str(referrer.get("id") or "").strip() if referrer else ""
+            if not referrer_user_id:
+                raise ValueError("invite code invalid")
         if config.user_registration_referral_required and not referrer_user_id:
-            raise ValueError("invite code invalid")
-        if input_invite_code and input_invite_code != site_invite_code and not referrer_user_id:
             raise ValueError("invite code invalid")
 
     domain = _email_domain(body.email)

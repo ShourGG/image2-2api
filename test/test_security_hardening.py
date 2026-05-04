@@ -24,9 +24,17 @@ class _DummyThread:
 
 
 class _DummyAuthService:
-    def __init__(self, *, login_error: str | None = None, register_error: str | None = None):
+    def __init__(
+        self,
+        *,
+        login_error: str | None = None,
+        register_error: str | None = None,
+        referrers: dict[str, dict[str, object]] | None = None,
+    ):
         self.login_error = login_error
         self.register_error = register_error
+        self.referrers = referrers or {}
+        self.last_register_kwargs: dict[str, object] | None = None
 
     def login_user(self, *, email: str, password: str):
         if self.login_error:
@@ -34,11 +42,12 @@ class _DummyAuthService:
         return ({"id": "u1", "role": "user", "name": "test", "email": email, "points": 50}, "usr-token")
 
     def get_user_by_invite_code(self, invite_code: str):
-        return None
+        return self.referrers.get(str(invite_code or "").strip())
 
     def register_user(self, **kwargs):
         if self.register_error:
             raise ValueError(self.register_error)
+        self.last_register_kwargs = dict(kwargs)
         email = str(kwargs.get("email") or "")
         name = str(kwargs.get("name") or "")
         return ({"id": "u1", "role": "user", "name": name or "test", "email": email, "points": 50}, "usr-token")
@@ -135,6 +144,11 @@ class AuthSecurityHardeningTests(unittest.TestCase):
             user_registration_referral_reward_points=10,
         )
 
+    def _config(self, **overrides):
+        data = dict(vars(self.fake_rate_limit_config))
+        data.update(overrides)
+        return SimpleNamespace(**data)
+
     def test_register_duplicate_error_is_generic(self) -> None:
         with mock.patch.object(
             system_module,
@@ -157,6 +171,121 @@ class AuthSecurityHardeningTests(unittest.TestCase):
 
             self.assertEqual(response.status_code, 400, response.text)
             self.assertEqual(response.json()["detail"]["error"], "注册失败，请检查输入信息或稍后再试")
+
+    def test_referral_code_does_not_satisfy_site_invite_code(self) -> None:
+        auth = _DummyAuthService(referrers={"FRIEND": {"id": "ref1", "invite_code": "FRIEND"}})
+        with mock.patch.object(
+            system_module,
+            "auth_service",
+            auth,
+        ), mock.patch.object(
+            system_module,
+            "rate_limit_service",
+            _DummyRateLimiter(RateLimitResult(allowed=True)),
+        ), mock.patch.object(
+            system_module,
+            "config",
+            self._config(
+                user_registration_invite_code="SITE",
+                user_registration_referral_enabled=True,
+                user_registration_referral_required=False,
+            ),
+        ):
+            client = TestClient(self.app)
+            for payload in ({"referral_code": "FRIEND"}, {"invite_code": "FRIEND"}):
+                response = client.post(
+                    "/auth/register",
+                    json={"email": "user@example.com", "password": "secret123", "name": "user", **payload},
+                )
+
+                self.assertEqual(response.status_code, 400, response.text)
+                self.assertEqual(response.json()["detail"]["error"], "邀请码不正确")
+            self.assertIsNone(auth.last_register_kwargs)
+
+    def test_site_and_referral_codes_are_validated_separately(self) -> None:
+        auth = _DummyAuthService(referrers={"FRIEND": {"id": "ref1", "invite_code": "FRIEND"}})
+        with mock.patch.object(
+            system_module,
+            "auth_service",
+            auth,
+        ), mock.patch.object(
+            system_module,
+            "rate_limit_service",
+            _DummyRateLimiter(RateLimitResult(allowed=True)),
+        ), mock.patch.object(
+            system_module,
+            "config",
+            self._config(
+                user_registration_invite_code="SITE",
+                user_registration_referral_enabled=True,
+                user_registration_referral_required=True,
+            ),
+        ):
+            client = TestClient(self.app)
+            response = client.post(
+                "/auth/register",
+                json={
+                    "email": "user@example.com",
+                    "password": "secret123",
+                    "name": "user",
+                    "site_invite_code": "SITE",
+                    "referral_code": "FRIEND",
+                },
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNotNone(auth.last_register_kwargs)
+            self.assertEqual(auth.last_register_kwargs["referrer_user_id"], "ref1")
+
+    def test_legacy_invite_code_still_accepts_site_invite_code(self) -> None:
+        auth = _DummyAuthService()
+        with mock.patch.object(
+            system_module,
+            "auth_service",
+            auth,
+        ), mock.patch.object(
+            system_module,
+            "rate_limit_service",
+            _DummyRateLimiter(RateLimitResult(allowed=True)),
+        ), mock.patch.object(
+            system_module,
+            "config",
+            self._config(user_registration_invite_code="SITE"),
+        ):
+            client = TestClient(self.app)
+            response = client.post(
+                "/auth/register",
+                json={"email": "user@example.com", "password": "secret123", "name": "user", "invite_code": "SITE"},
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNotNone(auth.last_register_kwargs)
+            self.assertEqual(auth.last_register_kwargs["referrer_user_id"], "")
+
+    def test_optional_referral_allows_registration_without_referral_code(self) -> None:
+        auth = _DummyAuthService(referrers={"FRIEND": {"id": "ref1", "invite_code": "FRIEND"}})
+        with mock.patch.object(
+            system_module,
+            "auth_service",
+            auth,
+        ), mock.patch.object(
+            system_module,
+            "rate_limit_service",
+            _DummyRateLimiter(RateLimitResult(allowed=True)),
+        ), mock.patch.object(
+            system_module,
+            "config",
+            self._config(user_registration_referral_enabled=True, user_registration_referral_required=False),
+        ):
+            client = TestClient(self.app)
+            response = client.post(
+                "/auth/register",
+                json={"email": "user@example.com", "password": "secret123", "name": "user"},
+            )
+
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNotNone(auth.last_register_kwargs)
+            self.assertEqual(auth.last_register_kwargs["referrer_user_id"], "")
 
     def test_login_error_is_generic(self) -> None:
         with mock.patch.object(
