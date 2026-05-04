@@ -104,6 +104,24 @@ def _coerce_non_negative_float(value: object, default: float) -> float:
     return max(0.0, normalized)
 
 
+def _normalize_string_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        candidates = value
+    elif isinstance(value, str):
+        candidates = value.replace(",", "\n").splitlines()
+    else:
+        candidates = []
+    items: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        text = str(candidate or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        items.append(text)
+    return items
+
+
 def _normalize_money_text(value: object, default: str = "0.00") -> str:
     try:
         from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -275,6 +293,34 @@ class ConfigStore:
         return _coerce_bool(value, True)
 
     @property
+    def user_registration_invite_code(self) -> str:
+        return str(
+            os.getenv("CHATGPT2API_USER_REGISTRATION_INVITE_CODE")
+            or self.data.get("user_registration_invite_code")
+            or ""
+        ).strip()
+
+    @property
+    def user_registration_total_user_limit(self) -> int:
+        return _coerce_non_negative_int(self.data.get("user_registration_total_user_limit", 0), 0)
+
+    @property
+    def user_registration_password_min_length(self) -> int:
+        return max(1, _coerce_non_negative_int(self.data.get("user_registration_password_min_length", 6), 6))
+
+    @property
+    def user_registration_name_required(self) -> bool:
+        return _coerce_bool(self.data.get("user_registration_name_required", False), False)
+
+    @property
+    def user_registration_allowed_email_domains(self) -> list[str]:
+        return _normalize_string_list(self.data.get("user_registration_allowed_email_domains"))
+
+    @property
+    def user_registration_blocked_email_domains(self) -> list[str]:
+        return _normalize_string_list(self.data.get("user_registration_blocked_email_domains"))
+
+    @property
     def user_registration_default_points(self) -> float:
         return _coerce_non_negative_float(self.data.get("user_registration_default_points", 50), 50)
 
@@ -285,6 +331,11 @@ class ConfigStore:
     @property
     def user_registration_default_paid_bonus_uses(self) -> int:
         return _coerce_non_negative_int(self.data.get("user_registration_default_paid_bonus_uses", 1), 1)
+
+    @property
+    def user_registration_default_preferred_image_mode(self) -> str:
+        value = str(self.data.get("user_registration_default_preferred_image_mode") or "free").strip().lower()
+        return value if value in {"free", "paid"} else "free"
 
     @property
     def auto_remove_invalid_accounts(self) -> bool:
@@ -639,9 +690,17 @@ class ConfigStore:
         data["auth_rate_limit_register_ip_email_window_seconds"] = self.auth_rate_limit_register_ip_email_window_seconds
         data["auth_register_ip_account_limit"] = self.auth_register_ip_account_limit
         data["user_registration_enabled"] = self.user_registration_enabled
+        data["user_registration_invite_code"] = self.user_registration_invite_code
+        data["user_registration_invite_code_set"] = bool(self.user_registration_invite_code)
+        data["user_registration_total_user_limit"] = self.user_registration_total_user_limit
+        data["user_registration_password_min_length"] = self.user_registration_password_min_length
+        data["user_registration_name_required"] = self.user_registration_name_required
+        data["user_registration_allowed_email_domains"] = self.user_registration_allowed_email_domains
+        data["user_registration_blocked_email_domains"] = self.user_registration_blocked_email_domains
         data["user_registration_default_points"] = self.user_registration_default_points
         data["user_registration_default_paid_coins"] = self.user_registration_default_paid_coins
         data["user_registration_default_paid_bonus_uses"] = self.user_registration_default_paid_bonus_uses
+        data["user_registration_default_preferred_image_mode"] = self.user_registration_default_preferred_image_mode
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["log_levels"] = self.log_levels

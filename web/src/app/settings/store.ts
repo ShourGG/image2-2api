@@ -64,6 +64,19 @@ function normalizeNumber(value: unknown, fallback: number, min = 0) {
   return Math.max(min, numeric);
 }
 
+function normalizeStringList(value: unknown) {
+  const source = Array.isArray(value) ? value : String(value || "").replace(/,/g, "\n").split("\n");
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const item of source) {
+    const text = String(item || "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    items.push(text);
+  }
+  return items;
+}
+
 function normalizeConfig(config: SettingsConfig): SettingsConfig {
   const imageGenerationStrategy =
     config.image_generation_strategy === "gpt2api" ||
@@ -106,9 +119,16 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     auth_rate_limit_register_ip_email_window_seconds: normalizeInteger(config.auth_rate_limit_register_ip_email_window_seconds, 1800, 1),
     auth_register_ip_account_limit: normalizeInteger(config.auth_register_ip_account_limit, 1, 0),
     user_registration_enabled: config.user_registration_enabled !== false,
+    user_registration_invite_code: String(config.user_registration_invite_code || ""),
+    user_registration_total_user_limit: normalizeInteger(config.user_registration_total_user_limit, 0, 0),
+    user_registration_password_min_length: normalizeInteger(config.user_registration_password_min_length, 6, 1),
+    user_registration_name_required: Boolean(config.user_registration_name_required),
+    user_registration_allowed_email_domains: normalizeStringList(config.user_registration_allowed_email_domains),
+    user_registration_blocked_email_domains: normalizeStringList(config.user_registration_blocked_email_domains),
     user_registration_default_points: normalizeNumber(config.user_registration_default_points, 50, 0),
     user_registration_default_paid_coins: normalizeInteger(config.user_registration_default_paid_coins, 0, 0),
     user_registration_default_paid_bonus_uses: normalizeInteger(config.user_registration_default_paid_bonus_uses, 1, 0),
+    user_registration_default_preferred_image_mode: config.user_registration_default_preferred_image_mode === "paid" ? "paid" : "free",
     image_generation_strategy: imageGenerationStrategy,
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
     auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
@@ -187,11 +207,21 @@ type SettingsStore = {
   setImageRetentionDays: (value: string) => void;
   setImagePollTimeoutSecs: (value: string) => void;
   setUserRegistrationEnabled: (value: boolean) => void;
+  setUserRegistrationBooleanField: (
+    key: "user_registration_enabled" | "user_registration_name_required",
+    value: boolean,
+  ) => void;
   setUserRegistrationField: (
     key:
+      | "user_registration_invite_code"
+      | "user_registration_total_user_limit"
+      | "user_registration_password_min_length"
+      | "user_registration_allowed_email_domains"
+      | "user_registration_blocked_email_domains"
       | "user_registration_default_points"
       | "user_registration_default_paid_coins"
-      | "user_registration_default_paid_bonus_uses",
+      | "user_registration_default_paid_bonus_uses"
+      | "user_registration_default_preferred_image_mode",
     value: string,
   ) => void;
   setAuthRateLimitField: (
@@ -333,9 +363,16 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         auth_rate_limit_register_ip_email_window_seconds: normalizeInteger(config.auth_rate_limit_register_ip_email_window_seconds, 1800, 1),
         auth_register_ip_account_limit: normalizeInteger(config.auth_register_ip_account_limit, 1, 0),
         user_registration_enabled: config.user_registration_enabled !== false,
+        user_registration_invite_code: String(config.user_registration_invite_code || "").trim(),
+        user_registration_total_user_limit: normalizeInteger(config.user_registration_total_user_limit, 0, 0),
+        user_registration_password_min_length: normalizeInteger(config.user_registration_password_min_length, 6, 1),
+        user_registration_name_required: Boolean(config.user_registration_name_required),
+        user_registration_allowed_email_domains: normalizeStringList(config.user_registration_allowed_email_domains),
+        user_registration_blocked_email_domains: normalizeStringList(config.user_registration_blocked_email_domains),
         user_registration_default_points: normalizeNumber(config.user_registration_default_points, 50, 0),
         user_registration_default_paid_coins: normalizeInteger(config.user_registration_default_paid_coins, 0, 0),
         user_registration_default_paid_bonus_uses: normalizeInteger(config.user_registration_default_paid_bonus_uses, 1, 0),
+        user_registration_default_preferred_image_mode: config.user_registration_default_preferred_image_mode === "paid" ? "paid" : "free",
         image_generation_strategy:
           config.image_generation_strategy === "gpt2api" ||
           config.image_generation_strategy === "codex_responses" ||
@@ -405,6 +442,10 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
 
   setUserRegistrationEnabled: (value) => {
     set((state) => state.config ? { config: { ...state.config, user_registration_enabled: value } } : {});
+  },
+
+  setUserRegistrationBooleanField: (key, value) => {
+    set((state) => state.config ? { config: { ...state.config, [key]: value } } : {});
   },
 
   setUserRegistrationField: (key, value) => {

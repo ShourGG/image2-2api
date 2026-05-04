@@ -20,6 +20,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSignup = async () => {
@@ -40,6 +41,7 @@ export default function SignupPage() {
         email: normalizedEmail,
         password,
         name: normalizedName,
+        invite_code: inviteCode.trim(),
       });
       if (!data.token) {
         throw new Error("注册返回缺少会话令牌");
@@ -76,7 +78,7 @@ export default function SignupPage() {
             </div>
             <div className="space-y-2">
               <h1 className="text-3xl font-semibold tracking-tight text-stone-950">注册新用户</h1>
-              <p className="text-sm leading-6 text-stone-500">注册后即可登录，只能使用画图和日志功能。</p>
+              <p className="text-sm leading-6 text-stone-500">注册后即可登录使用画图功能；如站点开启邀请码，请在下方填写。</p>
             </div>
           </div>
 
@@ -118,6 +120,19 @@ export default function SignupPage() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="至少 6 位"
+                className="h-13 rounded-2xl border-stone-200 bg-white px-4"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label htmlFor="invite-code" className="block text-sm font-medium text-stone-700">
+                邀请码
+              </label>
+              <Input
+                id="invite-code"
+                value={inviteCode}
+                onChange={(event) => setInviteCode(event.target.value)}
+                placeholder="可选，站点开启后必填"
                 className="h-13 rounded-2xl border-stone-200 bg-white px-4"
               />
             </div>

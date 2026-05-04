@@ -32,6 +32,10 @@ function formatNumber(value: unknown) {
   return numeric.toFixed(4).replace(/\.?0+$/, "");
 }
 
+function textareaListValue(value: unknown) {
+  return Array.isArray(value) ? value.join("\n") : String(value || "");
+}
+
 function formatUpstreamUsageResult(result: { ok: boolean; status: number; usage?: unknown; error?: unknown }) {
   if (!result.ok) {
     const error =
@@ -154,7 +158,7 @@ export function ConfigCard() {
   const [adminBindEmail, setAdminBindEmail] = useState("");
   const [adminBindPassword, setAdminBindPassword] = useState("");
   const [isBindingAdmin, setIsBindingAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<"basic" | "image" | "security">("basic");
+  const [activeTab, setActiveTab] = useState<"basic" | "image" | "registration" | "security">("basic");
   const [openSections, setOpenSections] = useState({
     admin: true,
     basic: true,
@@ -173,6 +177,7 @@ export function ConfigCard() {
   const setImageRetentionDays = useSettingsStore((state) => state.setImageRetentionDays);
   const setImagePollTimeoutSecs = useSettingsStore((state) => state.setImagePollTimeoutSecs);
   const setUserRegistrationEnabled = useSettingsStore((state) => state.setUserRegistrationEnabled);
+  const setUserRegistrationBooleanField = useSettingsStore((state) => state.setUserRegistrationBooleanField);
   const setUserRegistrationField = useSettingsStore((state) => state.setUserRegistrationField);
   const setAuthRateLimitField = useSettingsStore((state) => state.setAuthRateLimitField);
   const setAutoRemoveInvalidAccounts = useSettingsStore((state) => state.setAutoRemoveInvalidAccounts);
@@ -429,7 +434,7 @@ export function ConfigCard() {
     });
   };
 
-  const tabButtonClass = (tab: "basic" | "image" | "security") =>
+  const tabButtonClass = (tab: "basic" | "image" | "registration" | "security") =>
     `rounded-full px-4 py-2 text-sm transition ${
       activeTab === tab
         ? "bg-stone-950 text-white shadow-sm"
@@ -449,6 +454,9 @@ export function ConfigCard() {
             </button>
             <button type="button" className={tabButtonClass("image")} onClick={() => setActiveTab("image")}>
               生图配置
+            </button>
+            <button type="button" className={tabButtonClass("registration")} onClick={() => setActiveTab("registration")}>
+              用户注册
             </button>
             <button type="button" className={tabButtonClass("security")} onClick={() => setActiveTab("security")}>
               安全与日志
@@ -845,15 +853,15 @@ export function ConfigCard() {
             </SettingsSection>
           ) : null}
 
-          {activeTab === "security" ? (
-            <>
-              <SettingsSection
-                title="用户注册设置"
-                description="这里控制 `/signup` 普通用户自助注册，不影响 `/register` 注册机。"
-                isOpen={openSections.userRegistration}
-                onToggle={() => toggleSection("userRegistration")}
-              >
-                <div className="space-y-4">
+          {activeTab === "registration" ? (
+            <SettingsSection
+              title="用户注册设置"
+              description="这里控制 `/signup` 普通用户自助注册，不影响 `/register` 注册机。"
+              isOpen={openSections.userRegistration}
+              onToggle={() => toggleSection("userRegistration")}
+            >
+              <div className="space-y-5">
+                <div className="grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
                   <label className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
                     <Checkbox
                       checked={config?.user_registration_enabled !== false}
@@ -861,41 +869,126 @@ export function ConfigCard() {
                     />
                     <span>
                       <span className="block font-medium text-stone-800">允许普通用户注册</span>
-                      <span className="mt-1 block text-xs text-stone-500">关闭后 `/auth/register` 会返回“用户注册已关闭”。管理员登录和已有用户登录不受影响。</span>
+                      <span className="mt-1 block text-xs text-stone-500">关闭后 `/auth/register` 会拒绝新用户；管理员和已有用户登录不受影响。</span>
                     </span>
                   </label>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-2">
-                      <label className="text-sm text-stone-700">新用户初始积分</label>
-                      <Input
-                        value={String(config?.user_registration_default_points ?? "")}
-                        onChange={(event) => setUserRegistrationField("user_registration_default_points", event.target.value)}
-                        placeholder="50"
-                        className="h-10 rounded-xl border-stone-200 bg-white"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-stone-700">新用户初始图币</label>
-                      <Input
-                        value={String(config?.user_registration_default_paid_coins ?? "")}
-                        onChange={(event) => setUserRegistrationField("user_registration_default_paid_coins", event.target.value)}
-                        placeholder="0"
-                        className="h-10 rounded-xl border-stone-200 bg-white"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-stone-700">新用户高清体验次数</label>
-                      <Input
-                        value={String(config?.user_registration_default_paid_bonus_uses ?? "")}
-                        onChange={(event) => setUserRegistrationField("user_registration_default_paid_bonus_uses", event.target.value)}
-                        placeholder="1"
-                        className="h-10 rounded-xl border-stone-200 bg-white"
-                      />
-                    </div>
+                  <label className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+                    <Checkbox
+                      checked={Boolean(config?.user_registration_name_required)}
+                      onCheckedChange={(checked) => setUserRegistrationBooleanField("user_registration_name_required", Boolean(checked))}
+                    />
+                    <span>
+                      <span className="block font-medium text-stone-800">注册时必须填写昵称</span>
+                      <span className="mt-1 block text-xs text-stone-500">关闭时昵称可为空，系统会使用邮箱前缀。</span>
+                    </span>
+                  </label>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">邀请码</label>
+                    <Input
+                      value={String(config?.user_registration_invite_code ?? "")}
+                      onChange={(event) => setUserRegistrationField("user_registration_invite_code", event.target.value)}
+                      placeholder="留空则不需要邀请码"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                    <p className="text-xs text-stone-500">填写后，用户注册页必须输入一致的邀请码。</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">注册用户总上限</label>
+                    <Input
+                      value={String(config?.user_registration_total_user_limit ?? "")}
+                      onChange={(event) => setUserRegistrationField("user_registration_total_user_limit", event.target.value)}
+                      placeholder="0 表示不限"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                    <p className="text-xs text-stone-500">只统计普通用户，不统计管理员。</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">密码最小长度</label>
+                    <Input
+                      value={String(config?.user_registration_password_min_length ?? "")}
+                      onChange={(event) => setUserRegistrationField("user_registration_password_min_length", event.target.value)}
+                      placeholder="6"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
                   </div>
                 </div>
-              </SettingsSection>
 
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">允许注册邮箱域名</label>
+                    <Textarea
+                      value={textareaListValue(config?.user_registration_allowed_email_domains)}
+                      onChange={(event) => setUserRegistrationField("user_registration_allowed_email_domains", event.target.value)}
+                      placeholder={"留空表示不限\nexample.com\n*.example.com"}
+                      className="min-h-28 rounded-xl border-stone-200 bg-white font-mono text-xs shadow-none"
+                    />
+                    <p className="text-xs text-stone-500">一行一个。填写后，只允许这些域名注册。</p>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">禁止注册邮箱域名</label>
+                    <Textarea
+                      value={textareaListValue(config?.user_registration_blocked_email_domains)}
+                      onChange={(event) => setUserRegistrationField("user_registration_blocked_email_domains", event.target.value)}
+                      placeholder={"例如临时邮箱域名\nmailinator.com\n*.trashmail.com"}
+                      className="min-h-28 rounded-xl border-stone-200 bg-white font-mono text-xs shadow-none"
+                    />
+                    <p className="text-xs text-stone-500">一行一个。禁止列表优先于允许列表。</p>
+                  </div>
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-4">
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">新用户初始积分</label>
+                    <Input
+                      value={String(config?.user_registration_default_points ?? "")}
+                      onChange={(event) => setUserRegistrationField("user_registration_default_points", event.target.value)}
+                      placeholder="50"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">新用户初始图币</label>
+                    <Input
+                      value={String(config?.user_registration_default_paid_coins ?? "")}
+                      onChange={(event) => setUserRegistrationField("user_registration_default_paid_coins", event.target.value)}
+                      placeholder="0"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">高清体验次数</label>
+                    <Input
+                      value={String(config?.user_registration_default_paid_bonus_uses ?? "")}
+                      onChange={(event) => setUserRegistrationField("user_registration_default_paid_bonus_uses", event.target.value)}
+                      placeholder="1"
+                      className="h-10 rounded-xl border-stone-200 bg-white"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm text-stone-700">默认生图模式</label>
+                    <Select
+                      value={String(config?.user_registration_default_preferred_image_mode || "free")}
+                      onValueChange={(value) => setUserRegistrationField("user_registration_default_preferred_image_mode", value)}
+                    >
+                      <SelectTrigger className="h-10 rounded-xl border-stone-200 bg-white">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="free">免费模式</SelectItem>
+                        <SelectItem value="paid">高清模式</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            </SettingsSection>
+          ) : null}
+
+          {activeTab === "security" ? (
+            <>
               <SettingsSection
                 title="登录 / 注册限流"
                 description="命中后返回 429，并附带重试秒数。默认收起，只有需要调限流时再展开。"

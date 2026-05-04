@@ -100,9 +100,17 @@ export type SettingsConfig = {
   auth_rate_limit_register_ip_email_window_seconds?: number | string;
   auth_register_ip_account_limit?: number | string;
   user_registration_enabled?: boolean;
+  user_registration_invite_code?: string;
+  user_registration_invite_code_set?: boolean;
+  user_registration_total_user_limit?: number | string;
+  user_registration_password_min_length?: number | string;
+  user_registration_name_required?: boolean;
+  user_registration_allowed_email_domains?: string[];
+  user_registration_blocked_email_domains?: string[];
   user_registration_default_points?: number | string;
   user_registration_default_paid_coins?: number | string;
   user_registration_default_paid_bonus_uses?: number | string;
+  user_registration_default_preferred_image_mode?: ImageGenerationMode;
   image_generation_strategy?: "chatgpt2api" | "gpt2api" | "codex_responses" | "openai_compatible";
   image_generation_api_base_url?: string;
   image_generation_api_key?: string;
@@ -405,13 +413,14 @@ export async function loginWithPassword(email: string, password: string) {
   });
 }
 
-export async function registerUserAccount(payload: { email: string; password: string; name?: string }) {
+export async function registerUserAccount(payload: { email: string; password: string; name?: string; invite_code?: string }) {
   return httpRequest<LoginResponse>("/auth/register", {
     method: "POST",
     body: {
       email: String(payload.email || "").trim(),
       password: payload.password,
       name: String(payload.name || "").trim(),
+      invite_code: String(payload.invite_code || "").trim(),
     },
     redirectOnUnauthorized: false,
   });

@@ -57,6 +57,7 @@ class RegisterRequest(BaseModel):
     email: str = ""
     password: str = ""
     name: str = ""
+    invite_code: str = ""
 
 
 class AdminBindRequest(BaseModel):
@@ -95,6 +96,35 @@ def _client_ip(request: Request) -> str:
     if request.client and request.client.host:
         return str(request.client.host).strip()
     return "unknown"
+
+
+def _email_domain(email: str) -> str:
+    _local, _sep, domain = str(email or "").strip().lower().rpartition("@")
+    return domain
+
+
+def _domain_matches(domain: str, rule: str) -> bool:
+    normalized_rule = str(rule or "").strip().lower().lstrip("@")
+    if not domain or not normalized_rule:
+        return False
+    if normalized_rule.startswith("*."):
+        suffix = normalized_rule[2:]
+        return domain == suffix or domain.endswith(f".{suffix}")
+    return domain == normalized_rule
+
+
+def _validate_registration_policy(body: RegisterRequest) -> None:
+    invite_code = config.user_registration_invite_code
+    if invite_code and str(body.invite_code or "").strip() != invite_code:
+        raise ValueError("invite code invalid")
+
+    domain = _email_domain(body.email)
+    allowed_domains = config.user_registration_allowed_email_domains
+    blocked_domains = config.user_registration_blocked_email_domains
+    if allowed_domains and not any(_domain_matches(domain, item) for item in allowed_domains):
+        raise ValueError("email domain not allowed")
+    if blocked_domains and any(_domain_matches(domain, item) for item in blocked_domains):
+        raise ValueError("email domain blocked")
 
 
 def _enforce_auth_rate_limit(action: str, request: Request, email: str) -> None:
@@ -156,8 +186,19 @@ def _register_error_message(exc: ValueError) -> str:
         return "用户注册已关闭"
     if message == "email is invalid":
         return "邮箱格式不正确"
-    if message == "password must be at least 6 characters":
-        return "密码至少 6 位"
+    if message.startswith("password must be at least "):
+        min_length = message.removeprefix("password must be at least ").removesuffix(" characters")
+        return f"密码至少 {min_length} 位"
+    if message == "name is required":
+        return "请输入昵称"
+    if message == "invite code invalid":
+        return "邀请码不正确"
+    if message == "email domain not allowed":
+        return "当前邮箱域名不允许注册"
+    if message == "email domain blocked":
+        return "当前邮箱域名禁止注册"
+    if message == "user registration limit reached":
+        return "注册用户数已达上限"
     if message == "registration ip limit reached":
         return "当前 IP 已注册过账号"
     return "注册失败，请检查输入信息或稍后再试"
@@ -424,15 +465,20 @@ def create_router(app_version: str) -> APIRouter:
         client_ip = _client_ip(request)
         _enforce_auth_rate_limit("register", request, body.email)
         try:
+            _validate_registration_policy(body)
             identity, session_token = auth_service.register_user(
                 email=body.email,
                 password=body.password,
                 name=body.name,
                 registration_ip=client_ip,
                 registration_ip_limit=config.auth_register_ip_account_limit,
+                password_min_length=config.user_registration_password_min_length,
+                name_required=config.user_registration_name_required,
+                total_user_limit=config.user_registration_total_user_limit,
                 initial_points=config.user_registration_default_points,
                 initial_paid_coins=config.user_registration_default_paid_coins,
                 initial_paid_bonus_uses=config.user_registration_default_paid_bonus_uses,
+                preferred_image_mode=config.user_registration_default_preferred_image_mode,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": _register_error_message(exc)}) from exc

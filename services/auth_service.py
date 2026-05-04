@@ -769,26 +769,48 @@ class AuthService:
         name: str = "",
         registration_ip: str = "",
         registration_ip_limit: int = 0,
+        password_min_length: int = 6,
+        name_required: bool = False,
+        total_user_limit: int = 0,
         initial_points: object = DEFAULT_USER_POINTS,
         initial_paid_coins: object = DEFAULT_PAID_COINS,
         initial_paid_bonus_uses: object = DEFAULT_PAID_BONUS_USES,
+        preferred_image_mode: str = "free",
     ) -> tuple[dict[str, object], str]:
         normalized_email = self._clean_email(email)
         if "@" not in normalized_email:
             raise ValueError("email is invalid")
-        if len(password or "") < 6:
-            raise ValueError("password must be at least 6 characters")
-        normalized_name = self._clean(name) or _display_name_from_email(normalized_email)
+        try:
+            normalized_password_min_length = max(1, int(password_min_length))
+        except (TypeError, ValueError):
+            normalized_password_min_length = 6
+        if len(password or "") < normalized_password_min_length:
+            raise ValueError(f"password must be at least {normalized_password_min_length} characters")
+        cleaned_name = self._clean(name)
+        if name_required and not cleaned_name:
+            raise ValueError("name is required")
+        normalized_name = cleaned_name or _display_name_from_email(normalized_email)
         normalized_registration_ip = self._clean(registration_ip) or None
         try:
             normalized_ip_limit = max(0, int(registration_ip_limit))
         except (TypeError, ValueError):
             normalized_ip_limit = 0
+        try:
+            normalized_total_user_limit = max(0, int(total_user_limit))
+        except (TypeError, ValueError):
+            normalized_total_user_limit = 0
+        normalized_preferred_image_mode = str(preferred_image_mode or "free").strip().lower()
+        if normalized_preferred_image_mode not in {"free", "paid"}:
+            normalized_preferred_image_mode = "free"
 
         with self._lock:
             _, existing = self._find_user_by_email(normalized_email)
             if existing is not None:
                 raise ValueError("email already registered")
+            if normalized_total_user_limit > 0:
+                user_count = sum(1 for _index, _item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user"))
+                if user_count >= normalized_total_user_limit:
+                    raise ValueError("user registration limit reached")
             if normalized_registration_ip and normalized_ip_limit > 0:
                 registered_count = sum(
                     1
@@ -815,7 +837,7 @@ class AuthService:
                 "points": _coerce_points(initial_points, DEFAULT_USER_POINTS),
                 "paid_coins": _coerce_non_negative_int(initial_paid_coins, DEFAULT_PAID_COINS),
                 "paid_bonus_uses": _coerce_non_negative_int(initial_paid_bonus_uses, DEFAULT_PAID_BONUS_USES),
-                "preferred_image_mode": "free",
+                "preferred_image_mode": normalized_preferred_image_mode,
                 "checkin_total_count": 0,
                 "checkin_normal_count": 0,
                 "checkin_gamble_count": 0,
