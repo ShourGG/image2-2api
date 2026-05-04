@@ -338,6 +338,18 @@ class ConfigStore:
         return value if value in {"free", "paid"} else "free"
 
     @property
+    def user_registration_referral_enabled(self) -> bool:
+        return _coerce_bool(self.data.get("user_registration_referral_enabled", False), False)
+
+    @property
+    def user_registration_referral_required(self) -> bool:
+        return _coerce_bool(self.data.get("user_registration_referral_required", False), False)
+
+    @property
+    def user_registration_referral_reward_points(self) -> float:
+        return _coerce_non_negative_float(self.data.get("user_registration_referral_reward_points", 10), 10)
+
+    @property
     def auto_remove_invalid_accounts(self) -> bool:
         return _coerce_bool(self.data.get("auto_remove_invalid_accounts", False), False)
 
@@ -701,6 +713,9 @@ class ConfigStore:
         data["user_registration_default_paid_coins"] = self.user_registration_default_paid_coins
         data["user_registration_default_paid_bonus_uses"] = self.user_registration_default_paid_bonus_uses
         data["user_registration_default_preferred_image_mode"] = self.user_registration_default_preferred_image_mode
+        data["user_registration_referral_enabled"] = self.user_registration_referral_enabled
+        data["user_registration_referral_required"] = self.user_registration_referral_required
+        data["user_registration_referral_reward_points"] = self.user_registration_referral_reward_points
         data["auto_remove_invalid_accounts"] = self.auto_remove_invalid_accounts
         data["auto_remove_rate_limited_accounts"] = self.auto_remove_rate_limited_accounts
         data["log_levels"] = self.log_levels

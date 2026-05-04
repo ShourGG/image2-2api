@@ -113,10 +113,19 @@ def _domain_matches(domain: str, rule: str) -> bool:
     return domain == normalized_rule
 
 
-def _validate_registration_policy(body: RegisterRequest) -> None:
-    invite_code = config.user_registration_invite_code
-    if invite_code and str(body.invite_code or "").strip() != invite_code:
+def _validate_registration_policy(body: RegisterRequest) -> str:
+    input_invite_code = str(body.invite_code or "").strip()
+    site_invite_code = config.user_registration_invite_code
+    referrer = auth_service.get_user_by_invite_code(input_invite_code) if config.user_registration_referral_enabled else None
+    referrer_user_id = str(referrer.get("id") or "").strip() if referrer else ""
+
+    if site_invite_code and input_invite_code != site_invite_code and not referrer_user_id:
         raise ValueError("invite code invalid")
+    if config.user_registration_referral_enabled:
+        if config.user_registration_referral_required and not referrer_user_id:
+            raise ValueError("invite code invalid")
+        if input_invite_code and input_invite_code != site_invite_code and not referrer_user_id:
+            raise ValueError("invite code invalid")
 
     domain = _email_domain(body.email)
     allowed_domains = config.user_registration_allowed_email_domains
@@ -125,6 +134,7 @@ def _validate_registration_policy(body: RegisterRequest) -> None:
         raise ValueError("email domain not allowed")
     if blocked_domains and any(_domain_matches(domain, item) for item in blocked_domains):
         raise ValueError("email domain blocked")
+    return referrer_user_id
 
 
 def _enforce_auth_rate_limit(action: str, request: Request, email: str) -> None:
@@ -245,6 +255,9 @@ def _billing_for_role(role: str) -> dict[str, object]:
         "default_paid_bonus_uses": config.user_registration_default_paid_bonus_uses,
         "default_paid_coins": config.user_registration_default_paid_coins,
         "default_user_points": config.user_registration_default_points,
+        "referral_enabled": config.user_registration_referral_enabled,
+        "referral_required": config.user_registration_referral_required,
+        "referral_reward_points": config.user_registration_referral_reward_points,
     }
 
 
@@ -465,7 +478,7 @@ def create_router(app_version: str) -> APIRouter:
         client_ip = _client_ip(request)
         _enforce_auth_rate_limit("register", request, body.email)
         try:
-            _validate_registration_policy(body)
+            referrer_user_id = _validate_registration_policy(body)
             identity, session_token = auth_service.register_user(
                 email=body.email,
                 password=body.password,
@@ -479,6 +492,8 @@ def create_router(app_version: str) -> APIRouter:
                 initial_paid_coins=config.user_registration_default_paid_coins,
                 initial_paid_bonus_uses=config.user_registration_default_paid_bonus_uses,
                 preferred_image_mode=config.user_registration_default_preferred_image_mode,
+                referrer_user_id=referrer_user_id,
+                referral_reward_points=config.user_registration_referral_reward_points,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail={"error": _register_error_message(exc)}) from exc

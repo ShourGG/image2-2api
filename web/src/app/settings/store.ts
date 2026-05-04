@@ -129,6 +129,9 @@ function normalizeConfig(config: SettingsConfig): SettingsConfig {
     user_registration_default_paid_coins: normalizeInteger(config.user_registration_default_paid_coins, 0, 0),
     user_registration_default_paid_bonus_uses: normalizeInteger(config.user_registration_default_paid_bonus_uses, 1, 0),
     user_registration_default_preferred_image_mode: config.user_registration_default_preferred_image_mode === "paid" ? "paid" : "free",
+    user_registration_referral_enabled: Boolean(config.user_registration_referral_enabled),
+    user_registration_referral_required: Boolean(config.user_registration_referral_required),
+    user_registration_referral_reward_points: normalizeNumber(config.user_registration_referral_reward_points, 10, 0),
     image_generation_strategy: imageGenerationStrategy,
     auto_remove_invalid_accounts: Boolean(config.auto_remove_invalid_accounts),
     auto_remove_rate_limited_accounts: Boolean(config.auto_remove_rate_limited_accounts),
@@ -208,7 +211,11 @@ type SettingsStore = {
   setImagePollTimeoutSecs: (value: string) => void;
   setUserRegistrationEnabled: (value: boolean) => void;
   setUserRegistrationBooleanField: (
-    key: "user_registration_enabled" | "user_registration_name_required",
+    key:
+      | "user_registration_enabled"
+      | "user_registration_name_required"
+      | "user_registration_referral_enabled"
+      | "user_registration_referral_required",
     value: boolean,
   ) => void;
   setUserRegistrationField: (
@@ -221,7 +228,8 @@ type SettingsStore = {
       | "user_registration_default_points"
       | "user_registration_default_paid_coins"
       | "user_registration_default_paid_bonus_uses"
-      | "user_registration_default_preferred_image_mode",
+      | "user_registration_default_preferred_image_mode"
+      | "user_registration_referral_reward_points",
     value: string,
   ) => void;
   setAuthRateLimitField: (
@@ -373,6 +381,9 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
         user_registration_default_paid_coins: normalizeInteger(config.user_registration_default_paid_coins, 0, 0),
         user_registration_default_paid_bonus_uses: normalizeInteger(config.user_registration_default_paid_bonus_uses, 1, 0),
         user_registration_default_preferred_image_mode: config.user_registration_default_preferred_image_mode === "paid" ? "paid" : "free",
+        user_registration_referral_enabled: Boolean(config.user_registration_referral_enabled),
+        user_registration_referral_required: Boolean(config.user_registration_referral_required),
+        user_registration_referral_reward_points: normalizeNumber(config.user_registration_referral_reward_points, 10, 0),
         image_generation_strategy:
           config.image_generation_strategy === "gpt2api" ||
           config.image_generation_strategy === "codex_responses" ||

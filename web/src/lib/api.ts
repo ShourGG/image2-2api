@@ -111,6 +111,9 @@ export type SettingsConfig = {
   user_registration_default_paid_coins?: number | string;
   user_registration_default_paid_bonus_uses?: number | string;
   user_registration_default_preferred_image_mode?: ImageGenerationMode;
+  user_registration_referral_enabled?: boolean;
+  user_registration_referral_required?: boolean;
+  user_registration_referral_reward_points?: number | string;
   image_generation_strategy?: "chatgpt2api" | "gpt2api" | "codex_responses" | "openai_compatible";
   image_generation_api_base_url?: string;
   image_generation_api_key?: string;
@@ -224,6 +227,9 @@ export type RegisteredUser = {
   name: string;
   role: "user";
   email: string;
+  invite_code?: string;
+  invited_by_user_id?: string | null;
+  invited_by_invite_code?: string | null;
   enabled: boolean;
   created_at: string | null;
   registration_ip?: string | null;
@@ -237,6 +243,9 @@ export type RegisteredUser = {
   checkin_normal_count?: number;
   checkin_gamble_count?: number;
   checkin_total_change?: number;
+  referral_count?: number;
+  referral_points_earned?: number;
+  last_referral_at?: string | null;
   last_checkin_date?: string | null;
   last_checkin_mode?: "normal" | "gamble" | null;
   last_checkin_at?: string | null;
@@ -247,6 +256,9 @@ export type CurrentUser = {
   name: string;
   role: AuthRole;
   email?: string;
+  invite_code?: string;
+  invited_by_user_id?: string | null;
+  invited_by_invite_code?: string | null;
   enabled?: boolean;
   created_at?: string | null;
   registration_ip?: string | null;
@@ -260,6 +272,9 @@ export type CurrentUser = {
   checkin_normal_count?: number;
   checkin_gamble_count?: number;
   checkin_total_change?: number;
+  referral_count?: number;
+  referral_points_earned?: number;
+  last_referral_at?: string | null;
   last_checkin_date?: string | null;
   last_checkin_mode?: "normal" | "gamble" | null;
   last_checkin_at?: string | null;
@@ -348,6 +363,9 @@ export type MeResponse = {
     default_paid_bonus_uses?: number;
     default_paid_coins?: number;
     default_user_points: number;
+    referral_enabled?: boolean;
+    referral_required?: boolean;
+    referral_reward_points?: number;
   };
   checkins?: CheckinState;
 };

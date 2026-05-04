@@ -88,6 +88,14 @@ def _display_name_from_email(email: str) -> str:
     return local or email
 
 
+def _normalize_invite_code(value: object) -> str:
+    return "".join(ch for ch in str(value or "").strip().upper() if ch.isalnum())
+
+
+def _default_invite_code(item_id: str) -> str:
+    return f"U{_normalize_invite_code(item_id)}"
+
+
 def _today_key() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
@@ -326,6 +334,9 @@ class AuthService:
             role = "user"
         item_id = self._clean(raw.get("id")) or uuid.uuid4().hex[:12]
         name = self._clean(raw.get("name")) or _display_name_from_email(email)
+        invite_code = _normalize_invite_code(raw.get("invite_code")) or _default_invite_code(item_id)
+        invited_by_user_id = self._clean(raw.get("invited_by_user_id")) or None
+        invited_by_invite_code = _normalize_invite_code(raw.get("invited_by_invite_code")) or None
         created_at = self._clean(raw.get("created_at")) or _now_iso()
         registration_ip = self._clean(raw.get("registration_ip")) or None
         last_login_at = self._clean(raw.get("last_login_at")) or None
@@ -340,6 +351,9 @@ class AuthService:
         checkin_normal_count = _coerce_non_negative_int(raw.get("checkin_normal_count"))
         checkin_gamble_count = _coerce_non_negative_int(raw.get("checkin_gamble_count"))
         checkin_total_change = _coerce_points(raw.get("checkin_total_change"), 0, allow_negative=True)
+        referral_count = _coerce_non_negative_int(raw.get("referral_count"))
+        referral_points_earned = _coerce_points(raw.get("referral_points_earned"), 0)
+        last_referral_at = self._clean(raw.get("last_referral_at")) or None
         last_checkin_date = self._clean(raw.get("last_checkin_date")) or None
         last_checkin_mode = _normalize_checkin_mode(raw.get("last_checkin_mode"))
         last_checkin_at = self._clean(raw.get("last_checkin_at")) or None
@@ -350,6 +364,9 @@ class AuthService:
             "role": role,
             "email": email,
             "name": name,
+            "invite_code": invite_code,
+            "invited_by_user_id": invited_by_user_id,
+            "invited_by_invite_code": invited_by_invite_code,
             "password_hash": password_hash,
             "enabled": bool(raw.get("enabled", True)),
             "created_at": created_at,
@@ -366,6 +383,9 @@ class AuthService:
             "checkin_normal_count": checkin_normal_count,
             "checkin_gamble_count": checkin_gamble_count,
             "checkin_total_change": checkin_total_change,
+            "referral_count": referral_count,
+            "referral_points_earned": referral_points_earned,
+            "last_referral_at": last_referral_at,
             "last_checkin_date": last_checkin_date,
             "last_checkin_mode": last_checkin_mode,
             "last_checkin_at": last_checkin_at,
@@ -457,6 +477,23 @@ class AuthService:
                 continue
             yield index, item
 
+    def _find_user_by_invite_code_locked(self, invite_code: str) -> tuple[int | None, dict[str, object] | None]:
+        normalized_code = _normalize_invite_code(invite_code)
+        if not normalized_code:
+            return None, None
+        for index, item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user"):
+            if _normalize_invite_code(item.get("invite_code")) == normalized_code:
+                return index, item
+        return None, None
+
+    def _new_invite_code_locked(self) -> str:
+        while True:
+            candidate = _normalize_invite_code(secrets.token_urlsafe(8))[:10]
+            if len(candidate) < 6:
+                continue
+            if self._find_user_by_invite_code_locked(candidate)[1] is None:
+                return candidate
+
     @staticmethod
     def _public_key_item(item: dict[str, object]) -> dict[str, object]:
         return {
@@ -475,6 +512,9 @@ class AuthService:
             "name": item.get("name"),
             "role": item.get("role") if item.get("role") in {"admin", "user"} else "user",
             "email": item.get("email"),
+            "invite_code": item.get("invite_code"),
+            "invited_by_user_id": item.get("invited_by_user_id"),
+            "invited_by_invite_code": item.get("invited_by_invite_code"),
             "enabled": bool(item.get("enabled", True)),
             "created_at": item.get("created_at"),
             "registration_ip": item.get("registration_ip"),
@@ -488,6 +528,9 @@ class AuthService:
             "checkin_normal_count": _coerce_non_negative_int(item.get("checkin_normal_count")),
             "checkin_gamble_count": _coerce_non_negative_int(item.get("checkin_gamble_count")),
             "checkin_total_change": _coerce_points(item.get("checkin_total_change"), 0, allow_negative=True),
+            "referral_count": _coerce_non_negative_int(item.get("referral_count")),
+            "referral_points_earned": _coerce_points(item.get("referral_points_earned"), 0),
+            "last_referral_at": item.get("last_referral_at"),
             "last_checkin_date": item.get("last_checkin_date"),
             "last_checkin_mode": _normalize_checkin_mode(item.get("last_checkin_mode")),
             "last_checkin_at": item.get("last_checkin_at"),
@@ -747,6 +790,13 @@ class AuthService:
         with self._lock:
             return [self._public_user_item(item) for _, item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user")]
 
+    def get_user_by_invite_code(self, invite_code: str) -> dict[str, object] | None:
+        with self._lock:
+            _index, item = self._find_user_by_invite_code_locked(invite_code)
+            if item is None or not bool(item.get("enabled", True)):
+                return None
+            return self._public_user_item(item)
+
     def has_admin_account(self) -> bool:
         with self._lock:
             return any(True for _index, _item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="admin"))
@@ -776,6 +826,8 @@ class AuthService:
         initial_paid_coins: object = DEFAULT_PAID_COINS,
         initial_paid_bonus_uses: object = DEFAULT_PAID_BONUS_USES,
         preferred_image_mode: str = "free",
+        referrer_user_id: str = "",
+        referral_reward_points: object = 0,
     ) -> tuple[dict[str, object], str]:
         normalized_email = self._clean_email(email)
         if "@" not in normalized_email:
@@ -802,11 +854,25 @@ class AuthService:
         normalized_preferred_image_mode = str(preferred_image_mode or "free").strip().lower()
         if normalized_preferred_image_mode not in {"free", "paid"}:
             normalized_preferred_image_mode = "free"
+        normalized_referrer_user_id = self._clean(referrer_user_id)
+        referral_reward = _coerce_decimal(referral_reward_points, 0)
+        if referral_reward < 0:
+            referral_reward = Decimal("0")
 
         with self._lock:
             _, existing = self._find_user_by_email(normalized_email)
             if existing is not None:
                 raise ValueError("email already registered")
+            referrer_index: int | None = None
+            referrer_item: dict[str, object] | None = None
+            if normalized_referrer_user_id:
+                for candidate_index, candidate in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user"):
+                    if candidate.get("id") == normalized_referrer_user_id and bool(candidate.get("enabled", True)):
+                        referrer_index = candidate_index
+                        referrer_item = candidate
+                        break
+                if referrer_item is None:
+                    raise ValueError("invite code invalid")
             if normalized_total_user_limit > 0:
                 user_count = sum(1 for _index, _item in self._iter_items(kind=_KIND_USER_ACCOUNT, role="user"))
                 if user_count >= normalized_total_user_limit:
@@ -826,6 +892,9 @@ class AuthService:
                 "role": "user",
                 "email": normalized_email,
                 "name": normalized_name,
+                "invite_code": self._new_invite_code_locked(),
+                "invited_by_user_id": referrer_item.get("id") if referrer_item else None,
+                "invited_by_invite_code": referrer_item.get("invite_code") if referrer_item else None,
                 "password_hash": _hash_password(password),
                 "enabled": True,
                 "created_at": _now_iso(),
@@ -842,6 +911,9 @@ class AuthService:
                 "checkin_normal_count": 0,
                 "checkin_gamble_count": 0,
                 "checkin_total_change": 0,
+                "referral_count": 0,
+                "referral_points_earned": 0,
+                "last_referral_at": None,
                 "last_checkin_date": None,
                 "last_checkin_mode": None,
                 "last_checkin_at": None,
@@ -849,6 +921,17 @@ class AuthService:
             }
             item, raw_token = self._issue_user_session(item)
             self._items.append(item)
+            if referrer_index is not None and referrer_item is not None:
+                now = _now_iso()
+                next_referrer = dict(referrer_item)
+                next_referrer["points"] = _coerce_points(_coerce_decimal(next_referrer.get("points"), 0) + referral_reward, 0)
+                next_referrer["referral_count"] = _coerce_non_negative_int(next_referrer.get("referral_count")) + 1
+                next_referrer["referral_points_earned"] = _coerce_points(
+                    _coerce_decimal(next_referrer.get("referral_points_earned"), 0) + referral_reward,
+                    0,
+                )
+                next_referrer["last_referral_at"] = now
+                self._items[referrer_index] = next_referrer
             self._save()
             return self._public_user_item(item), raw_token
 

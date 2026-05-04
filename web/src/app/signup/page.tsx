@@ -126,13 +126,13 @@ export default function SignupPage() {
 
             <div className="space-y-2">
               <label htmlFor="invite-code" className="block text-sm font-medium text-stone-700">
-                邀请码
+                邀请码 / 推荐码
               </label>
               <Input
                 id="invite-code"
                 value={inviteCode}
                 onChange={(event) => setInviteCode(event.target.value)}
-                placeholder="可选，站点开启后必填"
+                placeholder="填写好友邀请码可让对方获得积分"
                 className="h-13 rounded-2xl border-stone-200 bg-white px-4"
               />
             </div>

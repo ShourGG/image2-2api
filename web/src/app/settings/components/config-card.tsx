@@ -884,16 +884,54 @@ export function ConfigCard() {
                   </label>
                 </div>
 
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-4">
+                  <div className="mb-3">
+                    <div className="text-sm font-medium text-stone-800">用户邀请码返积分</div>
+                    <p className="mt-1 text-xs text-stone-500">已有用户在个人中心复制自己的邀请码，新用户注册填写后，邀请人获得积分。</p>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-[1fr_1fr_0.8fr]">
+                    <label className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+                      <Checkbox
+                        checked={Boolean(config?.user_registration_referral_enabled)}
+                        onCheckedChange={(checked) => setUserRegistrationBooleanField("user_registration_referral_enabled", Boolean(checked))}
+                      />
+                      <span>
+                        <span className="block font-medium text-stone-800">开启邀请注册返积分</span>
+                        <span className="mt-1 block text-xs text-stone-500">关闭时用户邀请码不会奖励积分。</span>
+                      </span>
+                    </label>
+                    <label className="flex items-start gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-sm text-stone-700">
+                      <Checkbox
+                        checked={Boolean(config?.user_registration_referral_required)}
+                        onCheckedChange={(checked) => setUserRegistrationBooleanField("user_registration_referral_required", Boolean(checked))}
+                      />
+                      <span>
+                        <span className="block font-medium text-stone-800">必须使用用户邀请码注册</span>
+                        <span className="mt-1 block text-xs text-stone-500">开启后，没有有效用户邀请码就不能注册。</span>
+                      </span>
+                    </label>
+                    <div className="space-y-2">
+                      <label className="text-sm text-stone-700">每邀请 1 人奖励积分</label>
+                      <Input
+                        value={String(config?.user_registration_referral_reward_points ?? "")}
+                        onChange={(event) => setUserRegistrationField("user_registration_referral_reward_points", event.target.value)}
+                        placeholder="10"
+                        className="h-10 rounded-xl border-stone-200 bg-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="space-y-2">
-                    <label className="text-sm text-stone-700">邀请码</label>
+                    <label className="text-sm text-stone-700">站点邀请码</label>
                     <Input
                       value={String(config?.user_registration_invite_code ?? "")}
                       onChange={(event) => setUserRegistrationField("user_registration_invite_code", event.target.value)}
                       placeholder="留空则不需要邀请码"
                       className="h-10 rounded-xl border-stone-200 bg-white"
                     />
-                    <p className="text-xs text-stone-500">填写后，用户注册页必须输入一致的邀请码。</p>
+                    <p className="text-xs text-stone-500">这是全站统一注册口令；用户邀请码是上面的返积分功能。</p>
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm text-stone-700">注册用户总上限</label>

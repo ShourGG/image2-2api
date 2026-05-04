@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarCheck2, CreditCard, LoaderCircle, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { CalendarCheck2, Copy, CreditCard, LoaderCircle, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
@@ -326,6 +326,9 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
   const points = Math.max(0, Number(currentUser.points || 0));
   const paidCoins = Math.max(0, Number(currentUser.paid_coins || 0));
   const paidBonusUses = Math.max(0, Number(currentUser.paid_bonus_uses || 0));
+  const inviteCode = String(currentUser.invite_code || "");
+  const referralCount = Math.max(0, Number(currentUser.referral_count || 0));
+  const referralPointsEarned = Math.max(0, Number(currentUser.referral_points_earned || 0));
   const reservedPoints = Number(checkins?.rules.min_reserved_points || 10);
   const availableRisk = Math.max(0, points - reservedPoints);
   const betValue = Number(bet || 0);
@@ -421,6 +424,19 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
         { label: "可访问模块", value: `${permissions.length} 项`, hint: "当前会话权限", icon: ShieldCheck },
         { label: "号池模式", value: "全局可用池", hint: "哪个号能用就用哪个", icon: Sparkles },
       ];
+
+  const handleCopyInviteCode = async () => {
+    if (!inviteCode) {
+      toast.error("当前账号还没有邀请码");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(inviteCode);
+      toast.success("邀请码已复制");
+    } catch {
+      toast.error("复制失败，请手动复制");
+    }
+  };
 
   const handleNormalCheckin = async () => {
     setIsNormalSubmitting(true);
@@ -561,6 +577,9 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
               <ProfileRow label="最近登录" value={formatDateTime(currentUser.last_login_at)} />
               <ProfileRow label="最近调用" value={formatDateTime(currentUser.last_used_at)} />
               {session.role === "user" ? <ProfileRow label="积分余额" value={`${formatPoints(points)} 分`} /> : null}
+              {session.role === "user" ? <ProfileRow label="邀请码" value={inviteCode || "-"} /> : null}
+              {session.role === "user" ? <ProfileRow label="邀请人数" value={`${referralCount} 人`} /> : null}
+              {session.role === "user" ? <ProfileRow label="邀请奖励" value={`${formatPoints(referralPointsEarned)} 分`} /> : null}
               {session.role === "user" ? <ProfileRow label="累计签到" value={`${checkinStats.total_count} 次`} /> : null}
               {session.role === "user" ? <ProfileRow label="普通签到" value={`${checkinStats.normal_count} 次`} /> : null}
               {session.role === "user" ? <ProfileRow label="赌狗签到" value={`${checkinStats.gamble_count} 次`} /> : null}
@@ -591,6 +610,56 @@ function AccountPageContent({ session }: { session: StoredAuthSession }) {
               </div>
             </CardContent>
           </Card>
+
+          {session.role === "user" ? (
+            <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
+              <CardContent className="space-y-4 p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex size-10 items-center justify-center rounded-xl bg-stone-100">
+                      <UserRound className="size-5 text-stone-600" />
+                    </div>
+                    <div>
+                      <h2 className="text-lg font-semibold tracking-tight">邀请注册</h2>
+                      <p className="text-sm text-stone-500">
+                        {billing.referral_enabled
+                          ? `好友注册填写你的邀请码，你获得 ${formatPoints(billing.referral_reward_points || 0)} 积分。`
+                          : "后台暂未开启邀请返积分。"}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge variant={billing.referral_enabled ? "success" : "secondary"} className="rounded-md">
+                    {billing.referral_enabled ? "已开启" : "未开启"}
+                  </Badge>
+                </div>
+                <div className="flex flex-col gap-2 rounded-xl bg-stone-50 p-3 sm:flex-row sm:items-center">
+                  <div className="min-w-0 flex-1 font-mono text-lg font-semibold tracking-[0.18em] text-stone-950">
+                    {inviteCode || "-"}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 rounded-xl border-stone-200 bg-white px-4 text-stone-700"
+                    onClick={() => void handleCopyInviteCode()}
+                    disabled={!inviteCode}
+                  >
+                    <Copy className="size-4" />
+                    复制邀请码
+                  </Button>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-xl border border-stone-100 bg-white px-3 py-2">
+                    <div className="text-xs text-stone-500">已邀请</div>
+                    <div className="mt-1 text-sm font-semibold text-stone-900">{referralCount} 人</div>
+                  </div>
+                  <div className="rounded-xl border border-stone-100 bg-white px-3 py-2">
+                    <div className="text-xs text-stone-500">累计奖励</div>
+                    <div className="mt-1 text-sm font-semibold text-stone-900">{formatPoints(referralPointsEarned)} 分</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
 
           {session.role === "user" ? (
             <Card className="rounded-2xl border-white/80 bg-white/90 shadow-sm">
